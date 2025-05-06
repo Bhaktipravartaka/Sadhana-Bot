@@ -1252,7 +1252,7 @@ client.on('interactionCreate', async interaction => {
     }
     // Handle the /help command
     else if (commandName === 'help') {
-        const youtubeLink = 'YOUR_YOUTUBE_VIDEO_LINK_HERE'; // Replace with your actual YouTube link
+        const youtubeLink = 'Yet to be uploaded'; // Replace with your actual YouTube link
         const responseMessage = `Here is a helpful video: ${youtubeLink}`;
 
         // Reply publicly in the channel
