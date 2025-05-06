@@ -55,8 +55,10 @@ const mongoClient = new MongoClient(mongoUri, { // Use mongoUri from .env
 
 async function connectDB() {
   try {
+    console.log("Attempting to connect to MongoDB...");
     // Connect the client to the server
     await mongoClient.connect(); // Use mongoClient here
+    console.log("MongoDB client connected. Pinging database...");
     // Send a ping to confirm a successful connection
     await mongoClient.db("admin").command({ ping: 1 }); // Use mongoClient here
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
