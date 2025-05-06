@@ -12,11 +12,21 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, REST, Routes, PermissionsBitField, MessageFlags } = require('discord.js');
 const fs = require('fs').promises; // Import the file system module for saving/loading data
 const path = require('path'); // Import path module for joining paths
+
 // Using date-fns for robust date/time parsing and comparison
+// Make sure 'date-fns' is installed: npm install date-fns
 const { parse, differenceInCalendarDays, addDays, format } = require('date-fns');
+
 // For timezone handling - Needed for accurate IST time comparisons
-// Using direct destructuring for importing timezone functions
-const { utcToZonedTime, zonedTimeToUtc } = require('date-fns-tz');
+// IMPORTANT: Make sure 'date-fns-tz' (v2 or later) is installed: npm install date-fns-tz
+// The import below is correct for v2+. If you have v1, the import method is different
+// and you will likely encounter the "zonedTimeToUtc is not a function" error.
+const { toZonedTime, fromZonedTime } = require('date-fns-tz');
+
+// --- ADDED DIAGNOSTIC LOGGING ---
+console.log(`Type of utcToZonedTime after import: ${typeof utcToZonedTime}`);
+console.log(`Type of zonedTimeToUtc after import: ${typeof zonedTimeToUtc}`);
+// --- END ADDED DIAGNOSTIC LOGGING ---
 
 
 // Get bot token, client ID, and guild ID from environment variables.
@@ -114,13 +124,15 @@ function calculateScore(log) {
 
 // Helper function to parse time string with date context and convert to IST
 // Assumes timeString is in 'h:mm a' format (e.g., '4:30 AM', '10:00 PM')
+// This function relies on 'date-fns-tz' v2+ for zonedTimeToUtc.
 function parseTimeInIST(dateKey, timeString) {
     try {
         // Combine date (YYYY-MM-DD) and time string
         const dateTimeString = `${dateKey} ${timeString}`;
         // Use date-fns parse with a format string and the dateKey as the reference date
         // This helps parse times around midnight correctly relative to the date.
-        const parsedDate = parse(dateTimeString, 'yyyy-MM-dd h:mm a', new Date(dateKey));
+        // Use the dateKey itself as the base date for parsing to avoid timezone shifts during parsing
+        const parsedDate = parse(dateTimeString, 'yyyy-MM-dd h:mm a', new Date(dateKey + 'T00:00:00')); // Anchor parsing to midnight of the dateKey
 
          // Check if parsing was successful and resulted in a valid date
         if (isNaN(parsedDate.getTime())) {
@@ -128,23 +140,32 @@ function parseTimeInIST(dateKey, timeString) {
              return null;
         }
 
-        // The parse function in date-fns by default creates a Date object in the system's local timezone.
-        // To ensure consistency and work with IST correctly, we should convert this local time Date object to UTC,
-        // and then to the target timezone (IST).
+        // The `parse` function creates a Date object representing the *local* time equivalent
+        // of the parsed string. We need to treat this as wall-clock time in the *target* timezone (IST)
+        // and then find its UTC equivalent.
 
-        // Get the local timezone name
-        const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        // Convert the parsed local date/time directly to UTC, assuming the input time was *intended* for IST.
+        // The `zonedTimeToUtc` function takes the date object (which represents local time)
+        // and the *target* timezone (IST), returning the corresponding UTC Date object.
+        // This function requires 'date-fns-tz' v2 or later.
+        const utcDate = fromZonedTime(parsedDate, IST_TIMEZONE);
 
-        // Convert the parsed local date/time to UTC using the imported function
-        const utcDate = zonedTimeToUtc(parsedDate, localTimeZone);
+        // Convert the UTC date back to a zoned date object for IST (optional, depends on how you use it later)
+        // If you just need the Date object representing the correct moment in time (UTC), utcDate is sufficient.
+        // If you need to format it *as* IST time later, use utcToZonedTime.
+        const zonedDate = toZonedTime(utcDate, IST_TIMEZONE); // Use this if you need to display/compare in IST later
 
-        // Convert UTC date to IST using the imported function
-        const zonedDate = utcToZonedTime(utcDate, IST_TIMEZONE);
+        // For calculations like comparing against 5 AM IST, you often work with the UTC representation
+        // or convert the comparison time (5 AM IST) to UTC as well.
 
+        // Let's return the zonedDate object which represents the time in IST.
         return zonedDate;
 
     } catch (error) {
+        // Make sure the error message includes the specific function call that failed if possible
         console.error(`Error parsing time string "${timeString}" for date "${dateKey}":`, error);
+        // Consider adding more specific error handling here if needed,
+        // e.g., checking if error is a TypeError related to zonedTimeToUtc.
         return null; // Return null if parsing fails
     }
 }
@@ -444,31 +465,51 @@ client.on('interactionCreate', async interaction => {
 
         // --- Date and Time Parsing/Calculation ---
         const dateKey = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-        // Create a Date object for the logged date (start of the day in IST)
-        const loggedDate = parseTimeInIST(dateKey, '12:00 AM'); // Use midnight as reference for the start of the logged day
 
-        // Check if the provided date is valid before proceeding
-        if (!loggedDate) {
-             await interaction.reply({ content: 'Invalid date provided. Please use valid Day, Month, and Year.', ephemeral: true, flags: MessageFlags.Ephemeral });
+        // Create Date objects for comparison times (5 AM and 11 PM IST)
+        // We need to parse these relative to the *logged date*
+        const fiveAmIST = parseTimeInIST(dateKey, '5:00 AM');
+        const elevenPmIST = parseTimeInIST(dateKey, '11:00 PM'); // 11 PM on the *logged* day
+
+        // Check if the comparison times parsed correctly
+        if (!fiveAmIST || !elevenPmIST) {
+            console.error("Error parsing comparison times (5 AM / 11 PM IST). Check parseTimeInIST function and inputs.");
+             await interaction.reply({ content: 'Internal error processing times. Please check bot logs.', flags: [MessageFlags.Ephemeral] });
             return;
         }
-
 
         // Parse waking time for the logged date in IST
         const parsedWakingTime = parseTimeInIST(dateKey, wakingTime);
-
-        // Parse sleeping time. It's for the *previous* day relative to the log date.
-        const previousDay = new Date(year, month - 1, day); // Create date object for the log date
-        previousDay.setDate(previousDay.getDate() - 1); // Go back one day
-        const previousDateKey = `${previousDay.getFullYear()}-${(previousDay.getMonth() + 1).toString().padStart(2, '0')}-${previousDay.getDate().toString().padStart(2, '0')}`;
-
-        const parsedSleepingTime = parseTimeInIST(previousDateKey, sleepingTime);
-
-        // Add validation for time parsing
-        if (!parsedWakingTime || !parsedSleepingTime) {
-             await interaction.reply({ content: 'Invalid time format provided. Please use HH:MM AM/PM format (e.g., 4:30 AM, 10:00 PM).', ephemeral: true, flags: MessageFlags.Ephemeral });
+        if (!parsedWakingTime) {
+             await interaction.reply({ content: `Invalid waking time format: "${wakingTime}". Please use HH:MM AM/PM (e.g., 4:30 AM).`, flags: [MessageFlags.Ephemeral] });
             return;
         }
+        // Determine if woke up early (strictly before 5 AM IST on the logged date)
+        const wokeUpEarlyStatus = parsedWakingTime < fiveAmIST;
+
+
+        // Parse sleeping time. This is tricky - it usually refers to the *night before* the logged day.
+        // Example: Log for May 6th includes sleeping time from the night of May 5th.
+        const previousDayDate = new Date(year, month - 1, day); // Create date object for the log date
+        previousDayDate.setDate(previousDayDate.getDate() - 1); // Go back one day
+        const previousDateKey = format(previousDayDate, 'yyyy-MM-dd'); // Format previous day correctly
+
+        const parsedSleepingTime = parseTimeInIST(previousDateKey, sleepingTime); // Parse sleeping time relative to the PREVIOUS day
+
+        if (!parsedSleepingTime) {
+             await interaction.reply({ content: `Invalid sleeping time format: "${sleepingTime}". Please use HH:MM AM/PM (e.g., 10:30 PM).`, flags: [MessageFlags.Ephemeral] });
+            return;
+        }
+
+        // Determine if slept early (before 11 PM IST *on the night before the logged date*)
+        // We need 11 PM IST for the *previous* day for comparison.
+        const elevenPmISTPreviousDay = parseTimeInIST(previousDateKey, '11:00 PM');
+         if (!elevenPmISTPreviousDay) {
+            console.error("Error parsing comparison time (11 PM IST Previous Day).");
+             await interaction.reply({ content: 'Internal error processing sleeping time comparison. Please check bot logs.', flags: [MessageFlags.Ephemeral] });
+            return;
+        }
+        const sleptEarlyStatus = parsedSleepingTime < elevenPmISTPreviousDay;
 
 
         // --- Data Storage Logic ---
@@ -487,38 +528,51 @@ client.on('interactionCreate', async interaction => {
         const lastLoggedDateKey = data.streaks[userId].lastLoggedDateKey;
         let newStreak = currentStreak; // Initialize newStreak with currentStreak
 
-        // Only update streak if logging for a date that hasn't been logged yet,
-        // or if logging for a date *later* than the last logged date.
-        const lastLoggedDate = lastLoggedDateKey ? parseTimeInIST(lastLoggedDateKey, '12:00 AM') : null;
+        // Parse the logged date and last logged date for comparison
+        const loggedDate = parse(dateKey, 'yyyy-MM-dd', new Date()); // Use current date as base for parsing
+        const lastLoggedDate = lastLoggedDateKey ? parse(lastLoggedDateKey, 'yyyy-MM-dd', new Date()) : null;
 
-        if (loggedDate && lastLoggedDate) { // If both dates are valid and a previous log exists
-             const dayDifference = differenceInCalendarDays(loggedDate, lastLoggedDate);
+        if (loggedDate && !isNaN(loggedDate.getTime())) { // Check if loggedDate is valid
+            if (lastLoggedDate && !isNaN(lastLoggedDate.getTime())) { // Check if lastLoggedDate is valid
+                const dayDifference = differenceInCalendarDays(loggedDate, lastLoggedDate);
 
-             if (dayDifference === 1) {
-                 // Logged date is exactly one calendar day after the last logged date
-                 newStreak = currentStreak + 1;
-             } else if (dayDifference > 1) {
-                 // Logged date is more than one calendar day after the last logged date
-                 newStreak = 1; // Reset streak to 1
-             }
-             // If dayDifference is 0 (same day) or negative (logging a past date already logged),
-             // the streak doesn't change based on this log.
-        } else if (loggedDate && !lastLoggedDateKey) {
-             // First log entry for this user
-             newStreak = 1;
-        }
-        // If loggedDate is null (parsing failed), the streak is not updated.
+                if (dayDifference === 1) {
+                    // Logged date is exactly one calendar day after the last logged date
+                    newStreak = currentStreak + 1;
+                } else if (dayDifference > 1) {
+                    // Logged date is more than one calendar day after the last logged date
+                    newStreak = 1; // Reset streak to 1
+                } else if (dayDifference <= 0 && dateKey !== lastLoggedDateKey) {
+                    // Logging a past date that is earlier than or same as last logged date,
+                    // but *not* the exact same date (which means updating).
+                    // Don't reset streak, just keep the current one.
+                    // If it *is* the same date, streak logic handled below.
+                    newStreak = currentStreak;
+                }
+                // If dayDifference is 0 (same day), streak doesn't change based on this log *yet*.
+            } else {
+                // First log entry for this user
+                newStreak = 1;
+            }
 
-        // Update streak data ONLY if the current logged date is LATER than the last logged date
-        // This handles logging past dates without incorrectly affecting the streak
-        // If logging for a date that's already logged, we don't update the streak state.
-        if (!lastLoggedDateKey || (loggedDate && lastLoggedDate && loggedDate > lastLoggedDate)) {
-             data.streaks[userId].streakCount = newStreak;
-             data.streaks[userId].lastLoggedDateKey = dateKey;
+            // Update streak data ONLY if the current logged date is LATER than the last logged date
+            // OR if it's the very first log.
+            if (!lastLoggedDateKey || (loggedDate > lastLoggedDate)) {
+                data.streaks[userId].streakCount = newStreak;
+                data.streaks[userId].lastLoggedDateKey = dateKey;
+            } else if (dateKey === lastLoggedDateKey) {
+                // If logging for the *same* day as the last logged date (updating),
+                // ensure the streak count reflects the state *before* this log.
+                newStreak = currentStreak; // Keep the streak as it was for the response message
+            } else {
+                // Logging a past date that was already covered by the streak.
+                // Keep the existing streak state and show the current streak in the message.
+                 newStreak = data.streaks[userId].streakCount; // Ensure response shows the actual current streak
+            }
         } else {
-             // If logging for the same day or a past day already logged, keep the existing streak state.
-             // Ensure the response message shows the correct current streak for context.
-             newStreak = currentStreak; // Revert newStreak to currentStreak for the response message
+             console.error(`Invalid dateKey generated or parsed: ${dateKey}`);
+             await interaction.reply({ content: 'Invalid date provided. Please use valid Day, Month, and Year.', flags: [MessageFlags.Ephemeral] });
+            return; // Stop if the date is invalid
         }
 
 
@@ -560,23 +614,21 @@ client.on('interactionCreate', async interaction => {
             `**Updated Daily Practice Log for ${interaction.user.username} on ${dateKey}:**\n` :
             `**Daily Practice Logged for ${interaction.user.username} on ${dateKey}:**\n`;
 
-        responseMessage += `Waking Time: ${wakingTime} (Woke Early: ${wokeUpEarlyStatus ? 'Yes' : 'No'})\n`; // Include calculated early waking status
+        responseMessage += `Waking Time: ${wakingTime} (Woke Early < 5 AM IST: ${wokeUpEarlyStatus ? 'Yes' : 'No'})\n`; // Include calculated early waking status
         responseMessage += `Chanting Rounds: ${chantingRounds}\n`;
         responseMessage += `Mangala Aarti: ${mangalaAarti ? 'Yes' : 'No'}\n`;
         responseMessage += `Morning Program: ${morningProgram ? 'Yes' : 'No'}\n`;
         responseMessage += `Study Hours: ${studyHours}\n`;
         responseMessage += `Reading: ${readingDetails || 'Not logged'}\n`; // Display reading details, show 'Not logged' if empty
         responseMessage += `Listening Hours: ${listeningHours}\n`;
-        responseMessage += `Sleeping Time: ${sleepingTime} (Slept Early: ${sleptEarlyStatus ? 'Yes' : 'No'})\n`; // Include calculated early sleeping status
+        responseMessage += `Sleeping Time: ${sleepingTime} (Slept Early < 11 PM IST Previous Night: ${sleptEarlyStatus ? 'Yes' : 'No'})\n`; // Include calculated early sleeping status
          if (additionalService) {
             responseMessage += `Additional Service: ${additionalService}\n`;
         }
         responseMessage += `Regulative Principles Followed: Meat: ${noMeatEating ? 'Yes' : 'No'}, Gambling: ${noGambling ? 'Yes' : 'No'}, Illicit Sex: ${noIllicitSex ? 'Yes' : 'No'}, Intoxication: ${noIntoxication ? 'Yes' : 'No'}\n`; // Display regulative principles
         responseMessage += `**Score for this log: ${score}**\n`; // Display the score for the day
-        // Only show streak message if it's a new log or updating the most recent day's log
-        if (!isUpdatingExistingLog || (lastLoggedDateKey === dateKey)) {
-             responseMessage += `**Chanting Streak: ${data.streaks[userId].streakCount} day(s)!** 🙏\n`; // Display the current streak from data
-        }
+        // Display the current streak count from the potentially updated data
+        responseMessage += `**Current Chanting Streak: ${data.streaks[userId].streakCount} day(s)!** 🙏\n`;
 
 
         // --- Add Encouragement Messages ---
@@ -594,7 +646,7 @@ client.on('interactionCreate', async interaction => {
              encouragementMessages.push("Listening to lectures and kirtans nourishes the soul. Find some time to listen!");
         }
          if ((chantingRounds || 0) < 16) {
-             encouragementMessages.push(`Great job on ${chantingRounds} rounds!`);
+             encouragementMessages.push(`Great effort on ${chantingRounds} rounds! Keep pushing towards 16!`);
         } else if ((chantingRounds || 0) >= 16) {
              encouragementMessages.push(`Fantastic job on chanting ${chantingRounds} rounds! Keep it up!`);
         }
@@ -614,7 +666,7 @@ client.on('interactionCreate', async interaction => {
 
 
         // --- Respond to the user's command ---
-        // Response is visible to everyone in the channel.
+        // Response is visible to everyone in the channel by default.
         await interaction.reply({ content: responseMessage });
 
     }
@@ -625,11 +677,11 @@ client.on('interactionCreate', async interaction => {
         const userData = data.logs[userId] || {}; // Access logs data
 
         // --- Weekly Summary Logic ---
-        const now = new Date();
-        const sevenDaysAgo = new Date(now);
-        sevenDaysAgo.setDate(now.getDate() - 7);
-        sevenDaysAgo.setHours(0, 0, 0, 0); // Start of the day 7 days ago
-        now.setHours(23, 59, 59, 999); // End of today
+        // Use date-fns for reliable date calculations
+        const now = new Date(); // Current local time
+        const todayKey = format(now, 'yyyy-MM-dd'); // Today's date key
+        const sevenDaysAgoDate = addDays(now, -6); // Go back 6 days to include today (total 7 days)
+        const sevenDaysAgoKey = format(sevenDaysAgoDate, 'yyyy-MM-dd'); // Key for 7 days ago
 
 
         let totalRounds = 0;
@@ -647,11 +699,8 @@ client.on('interactionCreate', async interaction => {
 
         // Iterate through logged practices for the user
         for (const dateKey in userData) {
-             const [year, month, day] = dateKey.split('-').map(Number);
-            const logDate = new Date(year, month - 1, day); // month - 1 because Date month is 0-indexed
-
-            // Check if the log date is within the last 7 days (inclusive)
-            if (logDate >= sevenDaysAgo && logDate <= now) {
+            // Check if the log dateKey is within the last 7 days (inclusive)
+            if (dateKey >= sevenDaysAgoKey && dateKey <= todayKey) {
                  const log = userData[dateKey];
                  totalRounds += log.chantingRounds || 0;
                  totalStudyHours += log.studyHours || 0;
@@ -665,7 +714,8 @@ client.on('interactionCreate', async interaction => {
                  }
                  if (log.wokeUpEarlyStatus === true) earlyWakingCount++; // Count early waking
                  if (log.sleptEarlyStatus === true) earlySleepingCount++; // Count early sleeping
-                 if (log.noMeatEating === true) principlesFollowedCount++; // Count principles followed
+                 // Count each principle followed for that day
+                 if (log.noMeatEating === true) principlesFollowedCount++;
                  if (log.noGambling === true) principlesFollowedCount++;
                  if (log.noIllicitSex === true) principlesFollowedCount++;
                  if (log.noIntoxication === true) principlesFollowedCount++;
@@ -677,11 +727,12 @@ client.on('interactionCreate', async interaction => {
         const avgStudyHours = loggedDaysCount > 0 ? (totalStudyHours / loggedDaysCount).toFixed(2) : 0;
         const avgListeningHours = loggedDaysCount > 0 ? (totalListeningHours / loggedDaysCount).toFixed(2) : 0;
         const avgScore = loggedDaysCount > 0 ? (totalScore / loggedDaysCount).toFixed(2) : 0; // Average score
-        const avgPrinciples = loggedDaysCount > 0 ? (principlesFollowedCount / loggedDaysCount).toFixed(2) : 0; // Average principles followed per day
+        // Average number of principles followed *per logged day* (max 4)
+        const avgPrinciples = loggedDaysCount > 0 ? (principlesFollowedCount / loggedDaysCount).toFixed(2) : 0;
 
 
         let summaryMessage = `**Weekly Practice Summary for ${interaction.user.username}:**\n`;
-        summaryMessage += `(Summary based on ${loggedDaysCount} logged day(s) in the last 7 days)\n`;
+        summaryMessage += `(Summary from ${sevenDaysAgoKey} to ${todayKey}, based on ${loggedDaysCount} logged day(s))\n`;
         summaryMessage += `Total Score: ${totalScore.toFixed(2)} (Avg per logged day: ${avgScore})\n`; // Display total and avg score
         summaryMessage += `Total Rounds Chanted: ${totalRounds} (Avg per logged day: ${avgRounds})\n`;
         summaryMessage += `Total Study Hours: ${totalStudyHours.toFixed(2)} (Avg per logged day: ${avgStudyHours})\n`;
@@ -689,117 +740,44 @@ client.on('interactionCreate', async interaction => {
         summaryMessage += `Mangala Aarti Attended: ${mangalaAartiCount} time(s)\n`;
         summaryMessage += `Morning Program Attended: ${morningProgramCount} time(s)\n`;
         summaryMessage += `Woke up early (< 5 AM IST): ${earlyWakingCount} time(s)\n`; // Display early waking count
-        summaryMessage += `Slept early (< 11 PM IST): ${earlySleepingCount} time(s)\n`; // Display early sleeping count
-         summaryMessage += `Principles Followed: ${principlesFollowedCount} total (Avg per logged day: ${avgPrinciples})\n`; // Display principles count
-        summaryMessage += `Reading Logged: ${booksReadThisWeek.size > 0 ? Array.from(booksReadThisWeek).join(', ') : 'None'}\n`;
+        summaryMessage += `Slept early (< 11 PM IST Previous Night): ${earlySleepingCount} time(s)\n`; // Display early sleeping count
+         summaryMessage += `Avg. Regulative Principles Followed per Day: ${avgPrinciples} / 4\n`; // Display principles count
+        summaryMessage += `Reading Logged: ${booksReadThisMonth.size > 0 ? Array.from(booksReadThisMonth).join('; ') : 'None'}\n`;
 
 
-        await interaction.reply({ content: summaryMessage, ephemeral: true, flags: MessageFlags.Ephemeral }); // Keep summary ephemeral
-
-    }
-    // Handle the /monthlysummary command
-    else if (commandName === 'monthlysummary') {
-         const data = await loadData();
-        const userId = interaction.user.id;
-        const userData = data.logs[userId] || {}; // Access logs data
-
-        // --- Monthly Summary Logic ---
-        const now = new Date();
-        const currentYear = now.getFullYear();
-        const currentMonth = now.getMonth(); // getMonth() is 0-indexed (0 for January)
-
-        let totalRounds = 0;
-        let totalStudyHours = 0;
-        let totalListeningHours = 0;
-        let mangalaAartiCount = 0;
-        let morningProgramCount = 0;
-        let totalScore = 0; // New total score
-        let loggedDaysCount = 0;
-        const booksReadThisMonth = new Set();
-        let earlyWakingCount = 0; // Count of days woke up early
-        let earlySleepingCount = 0; // Count of days slept early
-        let principlesFollowedCount = 0; // Count of principles followed across logged days
-
-
-         // Iterate through logged practices for the user
-        for (const dateKey in userData) {
-            const [year, month, day] = dateKey.split('-').map(Number);
-            // Parse the dateKey (YYYY-MM-DD) into a Date object for comparison
-            // Note: month - 1 because Date month is 0-indexed (0 for January)
-            const logDate = new Date(year, month - 1, day);
-
-            // Check if the log is in the current month and year
-            if (logDate.getFullYear() === currentYear && logDate.getMonth() === currentMonth) {
-                 const log = userData[dateKey];
-                 totalRounds += log.chantingRounds || 0;
-                 totalStudyHours += log.studyHours || 0;
-                 totalListeningHours += log.listeningHours || 0;
-                 if (log.mangalaAarti === true) mangalaAartiCount++;
-                 if (log.morningProgram === true) morningProgramCount++;
-                 totalScore += log.score || 0; // Sum the scores
-                 loggedDaysCount++;
-                  if (log.readingDetails && log.readingDetails.trim() !== '') {
-                     booksReadThisMonth.add(log.readingDetails);
-                 }
-                 if (log.wokeUpEarlyStatus === true) earlyWakingCount++; // Count early waking
-                 if (log.sleptEarlyStatus === true) earlySleepingCount++; // Count early sleeping
-                 if (log.noMeatEating === true) principlesFollowedCount++; // Count principles followed
-                 if (log.noGambling === true) principlesFollowedCount++;
-                 if (log.noIllicitSex === true) principlesFollowedCount++;
-                 if (log.noIntoxication === true) principlesFollowedCount++;
-            }
-        }
-
-        // Calculate averages based on the number of days logs were found for in the month
-        const avgRounds = loggedDaysCount > 0 ? (totalRounds / loggedDaysCount).toFixed(2) : 0;
-        const avgStudyHours = loggedDaysCount > 0 ? (totalStudyHours / loggedDaysCount).toFixed(2) : 0;
-        const avgListeningHours = loggedDaysCount > 0 ? (totalListeningHours / loggedDaysCount).toFixed(2) : 0;
-        const avgScore = loggedDaysCount > 0 ? (totalScore / loggedDaysCount).toFixed(2) : 0; // Average score
-        const avgPrinciples = loggedDaysCount > 0 ? (principlesFollowedCount / loggedDaysCount).toFixed(2) : 0; // Average principles followed per day
-
-
-        const monthName = now.toLocaleString('default', { month: 'long' });
-
-        let summaryMessage = `**Monthly Practice Summary for ${interaction.user.username} (${monthName} ${currentYear}):**\n`;
-        summaryMessage += `(Summary based on ${loggedDaysCount} logged day(s) in the month)\n`;
-        summaryMessage += `Total Score: ${totalScore.toFixed(2)} (Avg per logged day: ${avgScore})\n`; // Display total and avg score
-        summaryMessage += `Total Rounds Chanted: ${totalRounds} (Avg per logged day: ${avgRounds})\n`;
-        summaryMessage += `Total Study Hours: ${totalStudyHours.toFixed(2)} (Avg per logged day: ${avgStudyHours})\n`;
-        summaryMessage += `Total Listening Hours: ${totalListeningHours.toFixed(2)} (Avg per logged day: ${avgListeningHours})\n`;
-        summaryMessage += `Mangala Aarti Attended: ${mangalaAartiCount} time(s)\n`;
-        summaryMessage += `Morning Program Attended: ${morningProgramCount} time(s)\n`;
-        summaryMessage += `Woke up early (< 5 AM IST): ${earlyWakingCount} time(s)\n`; // Display early waking count
-        summaryMessage += `Slept early (< 11 PM IST): ${earlySleepingCount} time(s)\n`; // Display early sleeping count
-         summaryMessage += `Principles Followed: ${principlesFollowedCount} total (Avg per logged day: ${avgPrinciples})\n`; // Display principles count
-        summaryMessage += `Reading Logged: ${booksReadThisMonth.size > 0 ? Array.from(booksReadThisMonth).join(', ') : 'None'}\n`;
-
-
-        await interaction.reply({ content: summaryMessage, ephemeral: true, flags: MessageFlags.Ephemeral }); // Keep summary ephemeral
+        // Use flags for ephemeral message
+        await interaction.reply({ content: summaryMessage, flags: [MessageFlags.Ephemeral] });
 
     }
      // Handle the /leaderboard command
     else if (commandName === 'leaderboard') {
-        await interaction.deferReply; // Defer reply because fetching usernames can take time
+        // Defer reply because fetching usernames can take time
+        // Make it non-ephemeral by default
+        await interaction.deferReply();
 
         const period = interaction.options.getString('period'); // 'weekly' or 'monthly'
         const data = await loadData();
         const now = new Date();
 
-        let startDate;
+        let startKey;
+        let endKey;
         let periodName;
 
         if (period === 'weekly') {
-            startDate = new Date(now);
-            startDate.setDate(now.getDate() - 7);
-             startDate.setHours(0, 0, 0, 0); // Start of the day 7 days ago
-             now.setHours(23, 59, 59, 999); // End of today
+            endKey = format(now, 'yyyy-MM-dd'); // Today
+            const startDate = addDays(now, -6); // 6 days ago to include today (total 7 days)
+            startKey = format(startDate, 'yyyy-MM-dd');
             periodName = 'Last 7 Days';
         } else if (period === 'monthly') {
-             startDate = new Date(now.getFullYear(), now.getMonth(), 1); // Start of the current month
-             now.setHours(23, 59, 59, 999); // End of today
+            const year = now.getFullYear();
+            const month = now.getMonth();
+            const startDate = new Date(year, month, 1); // First day of current month
+            startKey = format(startDate, 'yyyy-MM-dd');
+            endKey = format(now, 'yyyy-MM-dd'); // Today
             periodName = now.toLocaleString('default', { month: 'long', year: 'numeric' });
         } else {
-             await interaction.editReply({ content: 'Invalid period specified. Choose "weekly" or "monthly".', ephemeral: true, flags: MessageFlags.Ephemeral });
+            // Edit the deferred reply
+             await interaction.editReply({ content: 'Invalid period specified. Choose "weekly" or "monthly".', flags: [MessageFlags.Ephemeral] });
             return;
         }
 
@@ -812,11 +790,8 @@ client.on('interactionCreate', async interaction => {
             let loggedDaysCount = 0;
 
             for (const dateKey in userData) {
-                 const [year, month, day] = dateKey.split('-').map(Number);
-                 const logDate = new Date(year, month - 1, day); // month - 1 because Date month is 0-indexed
-
-                 // Check if the log date is within the selected period
-                 if (logDate >= startDate && logDate <= now) {
+                 // Check if the log dateKey is within the selected period
+                 if (dateKey >= startKey && dateKey <= endKey) {
                      totalScore += userData[dateKey].score || 0;
                      loggedDaysCount++;
                  }
@@ -831,8 +806,8 @@ client.on('interactionCreate', async interaction => {
         // Sort users by total score in descending order
         userScores.sort((a, b) => b.totalScore - a.totalScore);
 
-        // Get the top 5 users
-        const topUsers = userScores.slice(0, 5);
+        // Get the top 10 users (or fewer if less than 10 logged)
+        const topUsers = userScores.slice(0, 10);
 
         let leaderboardMessage = `**Spiritual Practice Leaderboard (${periodName}):**\n\n`;
 
@@ -844,12 +819,18 @@ client.on('interactionCreate', async interaction => {
                 // Fetch username - this is an async operation
                 let username = 'Unknown User';
                  try {
-                     // Use interaction.guild.members.fetch for guild-specific member data
-                     const member = await interaction.guild.members.fetch(userScore.userId);
-                     username = member.user.username; // Get username from the User object within the Member
+                     // Use interaction.guild.members.fetch for guild-specific member data if available
+                     if (interaction.guild) {
+                        const member = await interaction.guild.members.fetch(userScore.userId);
+                        username = member.user.username; // Get username from the User object within the Member
+                     } else {
+                         // Fallback to fetching user globally if not in a guild context
+                         const user = await client.users.fetch(userScore.userId);
+                         username = user.username;
+                     }
                  } catch (err) {
-                     console.error(`Could not fetch member ${userScore.userId} in guild ${interaction.guild.id}:`, err);
-                     // Fallback to fetching user globally if member fetch fails
+                     console.warn(`Could not fetch user/member ${userScore.userId}:`, err.message);
+                     // Attempt global fetch as a fallback even if guild fetch failed
                      try {
                           const user = await client.users.fetch(userScore.userId);
                           username = user.username;
@@ -863,12 +844,13 @@ client.on('interactionCreate', async interaction => {
             }
         }
 
-        // Edit the deferred reply
+        // Edit the deferred reply (non-ephemeral)
         await interaction.editReply({ content: leaderboardMessage });
     }
     // Handle the /myscore command (shows invoking user's score for a period)
     else if (commandName === 'myscore') {
-        await interaction.deferReply({ ephemeral: true, flags: MessageFlags.Ephemeral }); // Defer reply (ephemeral)
+        // Defer ephemeral reply
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
         const period = interaction.options.getString('period'); // 'weekly' or 'monthly'
         const userId = interaction.user.id; // Get the invoking user's ID
@@ -879,53 +861,36 @@ client.on('interactionCreate', async interaction => {
 
         // --- Calculate Score for the selected period ---
         const now = new Date();
-        let startDate;
+        let startKey;
+        let endKey;
         let periodName;
         let totalScore = 0;
         let loggedDaysCount = 0;
 
         if (period === 'weekly') {
-            startDate = new Date(now);
-            startDate.setDate(now.getDate() - 7);
-            startDate.setHours(0, 0, 0, 0); // Start of the day 7 days ago
-            const weeklyEndDate = new Date(now);
-            weeklyEndDate.setHours(23, 59, 59, 999);
+            endKey = format(now, 'yyyy-MM-dd'); // Today
+            const startDate = addDays(now, -6); // 6 days ago
+            startKey = format(startDate, 'yyyy-MM-dd');
             periodName = 'Last 7 Days';
-
-            // Iterate through logged practices for the user within the weekly period
-            for (const dateKey in userData) {
-                 const [year, month, day] = dateKey.split('-').map(Number);
-                const logDate = new Date(year, month - 1, day); // month - 1 because Date month is 0-indexed
-
-                // Check if the log date is within the weekly period
-                if (logDate >= startDate && logDate <= weeklyEndDate) {
-                    const log = userData[dateKey];
-                    totalScore += log.score || 0;
-                    loggedDaysCount++;
-                }
-            }
-
         } else if (period === 'monthly') {
-            startDate = new Date(now.getFullYear(), now.getMonth(), 1); // Start of the current month
-            const monthlyEndDate = new Date(now);
-            monthlyEndDate.setHours(23, 59, 59, 999);
+            const year = now.getFullYear();
+            const month = now.getMonth();
+            const startDate = new Date(year, month, 1); // First day of current month
+            startKey = format(startDate, 'yyyy-MM-dd');
+            endKey = format(now, 'yyyy-MM-dd'); // Today
             periodName = now.toLocaleString('default', { month: 'long', year: 'numeric' });
-
-            // Iterate through logged practices for the user within the monthly period
-            for (const dateKey in userData) {
-                 const [year, month, day] = dateKey.split('-').map(Number);
-                const logDate = new Date(year, month - 1, day); // month - 1 because Date month is 0-indexed
-
-                // Check if the log is in the current month and year
-                if (logDate.getFullYear() === now.getFullYear() && logDate.getMonth() === now.getMonth()) {
-                    const log = userData[dateKey];
-                    totalScore += log.score || 0;
-                    loggedDaysCount++;
-                }
-            }
         } else {
-             await interaction.editReply({ content: 'Invalid period specified. Choose "weekly" or "monthly".', ephemeral: true, flags: MessageFlags.Ephemeral });
+             await interaction.editReply({ content: 'Invalid period specified. Choose "weekly" or "monthly".', flags: [MessageFlags.Ephemeral] });
             return;
+        }
+
+        // Iterate through logged practices for the user within the period
+        for (const dateKey in userData) {
+            if (dateKey >= startKey && dateKey <= endKey) {
+                const log = userData[dateKey];
+                totalScore += log.score || 0;
+                loggedDaysCount++;
+            }
         }
 
 
@@ -934,13 +899,14 @@ client.on('interactionCreate', async interaction => {
         responseMessage += `Total Score: ${totalScore.toFixed(2)} points (${loggedDaysCount} logged day(s))\n`;
 
 
-        // Use editReply since we deferred earlier
-        await interaction.editReply({ content: responseMessage, ephemeral: true, flags: MessageFlags.Ephemeral });
+        // Use editReply since we deferred earlier (ephemeral)
+        await interaction.editReply({ content: responseMessage, flags: [MessageFlags.Ephemeral] });
 
     }
     // Handle the /showscore command (shows another user's score and streak)
     else if (commandName === 'showscore') { // Changed commandName check
-        await interaction.deferReply(); // Defer reply (not ephemeral)
+         // Defer non-ephemeral reply
+        await interaction.deferReply();
 
         const targetUser = interaction.options.getUser('user'); // Get the target user
         const userId = targetUser.id; // Use target user's ID
@@ -948,7 +914,7 @@ client.on('interactionCreate', async interaction => {
 
         const data = await loadData();
         const userData = data.logs[userId] || {}; // Access logs data for target user
-        const userStreakData = data.streaks[userId] || { streakCount: 0 }; // Access streak data for target user
+        const userStreakData = data.streaks[userId] || { streakCount: 0, lastLoggedDateKey: null }; // Access streak data for target user
 
         // Get the current streak count for the target user
         const currentStreak = userStreakData.streakCount || 0;
@@ -958,21 +924,16 @@ client.on('interactionCreate', async interaction => {
         const now = new Date();
 
         // Weekly Score (last 7 days)
-        const sevenDaysAgo = new Date(now);
-        sevenDaysAgo.setDate(now.getDate() - 7);
-        sevenDaysAgo.setHours(0, 0, 0, 0);
-        const weeklyEndDate = new Date(now);
-        weeklyEndDate.setHours(23, 59, 59, 999);
-
+        const weeklyEndKey = format(now, 'yyyy-MM-dd');
+        const weeklyStartDate = addDays(now, -6);
+        const weeklyStartKey = format(weeklyStartDate, 'yyyy-MM-dd');
         let weeklyScore = 0;
         let weeklyLoggedDays = 0;
 
         // Monthly Score (current month)
         const monthStartDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        const monthlyEndDate = new Date(now);
-        monthlyEndDate.setHours(23, 59, 59, 999);
-
-
+        const monthStartKey = format(monthStartDate, 'yyyy-MM-dd');
+        const monthlyEndKey = format(now, 'yyyy-MM-dd');
         let monthlyScore = 0;
         let monthlyLoggedDays = 0;
 
@@ -983,20 +944,17 @@ client.on('interactionCreate', async interaction => {
 
         // Iterate through all logged practices for the target user
         for (const dateKey in userData) {
-            const [year, month, day] = dateKey.split('-').map(Number);
-            const logDate = new Date(year, month - 1, day); // month - 1 because Date month is 0-indexed
-
             const log = userData[dateKey];
             const score = log.score || 0;
 
             // Check for Weekly
-            if (logDate >= sevenDaysAgo && logDate <= weeklyEndDate) {
+            if (dateKey >= weeklyStartKey && dateKey <= weeklyEndKey) {
                 weeklyScore += score;
                 weeklyLoggedDays++;
             }
 
             // Check for Monthly
-            if (logDate.getFullYear() === now.getFullYear() && logDate.getMonth() === now.getMonth()) {
+             if (dateKey >= monthStartKey && dateKey <= monthlyEndKey) {
                  monthlyScore += score;
                  monthlyLoggedDays++;
             }
@@ -1010,21 +968,20 @@ client.on('interactionCreate', async interaction => {
         // Updated message to show scores for the target user
         let responseMessage = `**Practice Scores for ${username}:**\n\n`;
         responseMessage += `**Current Chanting Streak:** ${currentStreak} day(s) 🙏\n\n`; // Added streak here!
-        responseMessage += `**Weekly (Last ${weeklyLoggedDays} logged days):** ${weeklyScore.toFixed(2)} points\n`;
-        responseMessage += `**Monthly (${now.toLocaleString('default', { month: 'long', year: 'numeric' })} - ${monthlyLoggedDays} logged days):** ${monthlyScore.toFixed(2)} points\n`;
-        responseMessage += `**All-Time (${allTimeLoggedDays} logged days):** ${allTimeScore.toFixed(2)} points\n`;
+        responseMessage += `**Weekly (Last 7 Days - ${weeklyLoggedDays} logged):** ${weeklyScore.toFixed(2)} points\n`;
+        responseMessage += `**Monthly (${now.toLocaleString('default', { month: 'long', year: 'numeric' })} - ${monthlyLoggedDays} logged):** ${monthlyScore.toFixed(2)} points\n`;
+        responseMessage += `**All-Time (${allTimeLoggedDays} logged):** ${allTimeScore.toFixed(2)} points\n`;
 
 
-        // Use editReply since we deferred earlier, and remove ephemeral flag
+        // Use editReply since we deferred earlier (non-ephemeral)
         await interaction.editReply({ content: responseMessage });
 
     }
      // Handle the /streakset command (Admin only)
     else if (commandName === 'streakset') {
-        // Discord's default_member_permissions handles the primary check,
-        // but a redundant check here is good practice.
-        if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-             await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true, flags: MessageFlags.Ephemeral });
+        // Check for Administrator permission
+        if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
+             await interaction.reply({ content: 'You do not have permission to use this command.', flags: [MessageFlags.Ephemeral] });
             return;
         }
 
@@ -1032,7 +989,7 @@ client.on('interactionCreate', async interaction => {
         const newStreak = interaction.options.getInteger('streak'); // Get the new streak number
 
         if (newStreak < 0) {
-             await interaction.reply({ content: 'Streak value cannot be negative.', ephemeral: true, flags: MessageFlags.Ephemeral });
+             await interaction.reply({ content: 'Streak value cannot be negative.', flags: [MessageFlags.Ephemeral] });
             return;
         }
 
@@ -1046,37 +1003,24 @@ client.on('interactionCreate', async interaction => {
         // Update the streak count
         data.streaks[targetUserId].streakCount = newStreak;
 
-        // When manually setting a streak, we should also set the last logged date
-        // to the previous day relative to *today* in IST, so the next log
-        // correctly increments the streak.
-
-        // --- Calculate yesterday's date using standard Date and format ---
+        // When manually setting a streak, set the last logged date to yesterday
+        // relative to *today* to allow the streak to continue tomorrow.
         try {
-            // Get current date in the system's local time
             const now = new Date();
-
-            // Calculate yesterday's date in the system's local time
-            const yesterday = new Date(now);
-            yesterday.setDate(now.getDate() - 1);
-
-            // Format yesterday's date into YYYY-MM-DD format
-            // This uses date-fns format, which should be available.
-            const yesterdayKey = format(yesterday, 'yyyy-MM-dd');
+            const yesterday = addDays(now, -1); // Get yesterday using date-fns
+            const yesterdayKey = format(yesterday, 'yyyy-MM-dd'); // Format correctly
 
             data.streaks[targetUserId].lastLoggedDateKey = yesterdayKey;
 
         } catch (error) {
              console.error('Error during date calculation for streakset:', error);
-             // Removed the specific error check and message as it wasn't helpful
-             await interaction.reply({ content: 'An internal error occurred while setting the streak date. Please contact bot administrator.', ephemeral: true, flags: MessageFlags.Ephemeral });
+             await interaction.reply({ content: 'An internal error occurred while setting the streak date. Please contact bot administrator.', flags: [MessageFlags.Ephemeral] });
              return; // Stop execution if date calculation fails
         }
-        // --- End alternative date calculation ---
-
 
         await saveData(data);
 
-        await interaction.reply({ content: `Successfully set ${targetUser.username}'s chanting streak to ${newStreak}. Their last logged date is set for streak calculation.`, ephemeral: true, flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: `Successfully set ${targetUser.username}'s chanting streak to ${newStreak}. Their last logged date is set for streak calculation.`, flags: [MessageFlags.Ephemeral] });
     }
     // Handle the /help command
     else if (commandName === 'help') {
@@ -1096,6 +1040,8 @@ client.login(token);
 client.on('error', error => {
     console.error('Something went wrong with the Discord client:', error);
 });
+
+// Optional: Keep alive web server for hosting platforms
 const express = require("express");
 const app = express();
 const port = process.env.PORT || 3000;
