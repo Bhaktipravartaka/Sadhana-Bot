@@ -1,2 +1,4 @@
-.env
+
+node_modules/
 sadhana_data.json
+.env
