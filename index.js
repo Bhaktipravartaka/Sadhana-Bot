@@ -51,6 +51,12 @@ const mongoClient = new MongoClient(mongoUri, { // Use mongoUri from .env
   // although MongoClient options are slightly different.
   // useNewUrlParser: true, // Deprecated in recent MongoDB driver versions
   // useUnifiedTopology: true, // Deprecated in recent MongoDB driver versions
+
+  // --- Added/Adjusted Timeout Options ---
+  connectTimeoutMS: 30000, // Increase initial connection timeout to 30 seconds
+  serverSelectionTimeoutMS: 30000, // Increase server selection timeout to 30 seconds
+  srvMaxHosts: 5, // Ensure the driver attempts to connect to multiple hosts from SRV record
+  // --- End Added/Adjusted Timeout Options ---
 });
 
 async function connectDB() {
@@ -540,7 +546,7 @@ const rest = new REST({ version: '10' }).setToken(token);
 // --- Bot Event Handlers ---
 
 client.once('ready', () => {
-    console.log('Logged in as ${client.user.tag}!'); // Corrected closing quote
+    console.log(`Logged in as ${client.user.tag}!`); // Corrected closing quote
     console.log('Bot is online and ready to receive slash commands!'); // Corrected closing quote
 });
 
