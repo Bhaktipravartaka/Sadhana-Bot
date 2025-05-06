@@ -45,25 +45,45 @@ const IST_TIMEZONE = 'Asia/Kolkata'; // IANA timezone name for India Standard Ti
 // Function to load data from the JSON file
 async function loadData() {
     try {
+        // Read the file content
         const data = await fs.readFile(DATA_FILE, 'utf8');
-        // Ensure the data structure has top-level logs and streaks keys
-        const parsedData = JSON.parse(data);
-        if (!parsedData.logs) parsedData.logs = {};
-        if (!parsedData.streaks) parsedData.streaks = {};
-        return parsedData;
-    } catch (error) {
-        // If the file doesn't exist or there's an error reading it, return initial structure
-        if (error.code === 'ENOENT') {
+        // --- ADDED CHECK FOR EMPTY OR WHITESPACE-ONLY DATA ---
+        if (!data || data.trim() === '') {
+            console.warn('Data file is empty or contains only whitespace. Returning initial structure.');
             return { logs: {}, streaks: {} };
         }
+        // --- END ADDED CHECK ---
+
+        // Attempt to parse the JSON data
+        const parsedData = JSON.parse(data);
+
+        // Ensure the data structure has top-level logs and streaks keys
+        // This handles cases where the file might exist but has an unexpected structure
+        if (!parsedData.logs) parsedData.logs = {};
+        if (!parsedData.streaks) parsedData.streaks = {};
+
+        return parsedData;
+
+    } catch (error) {
+        // If the file doesn't exist (ENOENT), return initial structure
+        if (error.code === 'ENOENT') {
+            console.warn('Data file not found. Creating a new one with initial structure on save.');
+            // We don't need to create the file here, saveData will create it if it doesn't exist
+            return { logs: {}, streaks: {} };
+        }
+        // If any other error occurs during reading or parsing (like SyntaxError)
         console.error('Error loading data:', error);
-        return { logs: {}, streaks: {} }; // Return initial structure on other errors too
+        console.error('Returning initial structure due to loading error. Existing data might be lost if the file was corrupted.');
+        // Return initial structure on other errors too, to prevent bot crash
+        // A more advanced approach could try to back up the corrupted file before returning empty data.
+        return { logs: {}, streaks: {} };
     }
 }
 
 // Function to save data to the JSON file
 async function saveData(data) {
     try {
+        // Use null, 2 for pretty printing the JSON file
         await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
     } catch (error) {
         console.error('Error saving data:', error);
@@ -442,19 +462,37 @@ client.once('ready', () => {
 
 // Event handler for handling interactions. Slash commands are a type of interaction.
 client.on('interactionCreate', async interaction => {
-    // Check if the interaction is specifically a command interaction.
+    // --- ADDED LOGGING ---
+    console.log(`[${new Date().toISOString()}] Interaction received: ${interaction.id}, Type: ${interaction.type}, Command: ${interaction.isCommand() ? interaction.commandName : 'N/A'}`);
+    // --- END ADDED LOGGING ---
+
     if (!interaction.isCommand()) return;
 
-    // Get the name of the command that was used by the user.
     const { commandName } = interaction;
 
     // --- Handle Specific Commands ---
 
     // Handle the /logpractice command
     if (commandName === 'logpractice') {
+        // --- ADDED LOGGING ---
+        console.log(`[${new Date().toISOString()}] Handling /logpractice command for user ${interaction.user.tag}`);
+        console.log(`[${new Date().toISOString()}] Attempting to defer reply for interaction ${interaction.id}`);
+        // --- END ADDED LOGGING ---
+
         // Defer the reply as time parsing and saving might take a moment
         // Removed ephemeral: true to make the reply public
-        await interaction.deferReply();
+        try {
+            await interaction.deferReply();
+             // --- ADDED LOGGING ---
+            console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+            // --- END ADDED LOGGING ---
+        } catch (deferError) {
+             console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+             // If deferring fails, we cannot proceed with editReply.
+             // The interaction is likely expired. Just log and return.
+             return;
+        }
+
 
         // Get the values provided by the user for each option of the command.
         const day = interaction.options.getInteger('day');
