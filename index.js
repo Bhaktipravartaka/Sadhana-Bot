@@ -192,7 +192,7 @@ const Sadhana = mongoose.model('Sadhana', sadhanaSchema);
 // Define Schema and Model for user streaks
 const userStreakSchema = new mongoose.Schema({
     userId: {
-        type: String,
+        type: String, // It's a string of numbers
         required: true,
         unique: true, // Each user should only have one streak entry
     },
