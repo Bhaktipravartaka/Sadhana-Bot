@@ -779,7 +779,7 @@ client.on('interactionCreate', async interaction => {
     }
      // Handle the /leaderboard command
     else if (commandName === 'leaderboard') {
-        await interaction.deferReply({ ephemeral: true, flags: MessageFlags.Ephemeral }); // Defer reply because fetching usernames can take time
+        await interaction.deferReply; // Defer reply because fetching usernames can take time
 
         const period = interaction.options.getString('period'); // 'weekly' or 'monthly'
         const data = await loadData();
@@ -864,7 +864,7 @@ client.on('interactionCreate', async interaction => {
         }
 
         // Edit the deferred reply
-        await interaction.editReply({ content: leaderboardMessage, ephemeral: true, flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: leaderboardMessage });
     }
     // Handle the /myscore command (shows invoking user's score for a period)
     else if (commandName === 'myscore') {
