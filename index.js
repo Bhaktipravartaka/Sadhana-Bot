@@ -19,13 +19,14 @@ const { parse, differenceInCalendarDays, addDays, format } = require('date-fns')
 
 // For timezone handling - Needed for accurate IST time comparisons
 // IMPORTANT: Make sure 'date-fns-tz' (v2 or later) is installed: npm install date-fns-tz
-// The import below is correct for v2+. If you have v1, the import method is different
-// and you will likely encounter the "zonedTimeToUtc is not a function" error.
-const { toZonedTime, fromZonedTime } = require('date-fns-tz');
+// Corrected import for date-fns-tz v3+
+const { toZonedTime, fromZonedTime, formatInTimeZone } = require('date-fns-tz');
 
 // --- ADDED DIAGNOSTIC LOGGING ---
-console.log(`Type of utcToZonedTime after import: ${typeof utcToZonedTime}`);
-console.log(`Type of zonedTimeToUtc after import: ${typeof zonedTimeToUtc}`);
+// Updated logs to reflect new import names
+console.log(`Type of toZonedTime after import: ${typeof toZonedTime}`);
+console.log(`Type of fromZonedTime after import: ${typeof fromZonedTime}`);
+console.log(`Type of formatInTimeZone after import: ${typeof formatInTimeZone}`);
 // --- END ADDED DIAGNOSTIC LOGGING ---
 
 
@@ -107,6 +108,9 @@ function calculateScore(log) {
     }
 
     // Sleeping Early (before 11 PM IST): 1 point if sleptEarlyStatus is true
+    // IMPORTANT: This check is only valid if sleepingTime was successfully parsed as a Date.
+    // The 'Not Slept' case needs to be handled separately or should result in sleptEarlyStatus being false.
+    // The logic in the interaction handler correctly sets sleptEarlyStatus based on parsing result.
     if (log.sleptEarlyStatus === true) {
         score += 1;
     }
@@ -124,7 +128,7 @@ function calculateScore(log) {
 
 // Helper function to parse time string with date context and convert to IST
 // Assumes timeString is in 'h:mm a' format (e.g., '4:30 AM', '10:00 PM')
-// This function relies on 'date-fns-tz' v2+ for zonedTimeToUtc.
+// This function now uses fromZonedTime from 'date-fns-tz' v3+.
 function parseTimeInIST(dateKey, timeString) {
     try {
         // Combine date (YYYY-MM-DD) and time string
@@ -137,6 +141,7 @@ function parseTimeInIST(dateKey, timeString) {
          // Check if parsing was successful and resulted in a valid date
         if (isNaN(parsedDate.getTime())) {
              console.error(`Parsed date is invalid for string: "${dateTimeString}"`);
+             // Return null or throw an error to indicate failure
              return null;
         }
 
@@ -145,28 +150,29 @@ function parseTimeInIST(dateKey, timeString) {
         // and then find its UTC equivalent.
 
         // Convert the parsed local date/time directly to UTC, assuming the input time was *intended* for IST.
-        // The `zonedTimeToUtc` function takes the date object (which represents local time)
+        // The `fromZonedTime` function takes the date object (which represents local time)
         // and the *target* timezone (IST), returning the corresponding UTC Date object.
-        // This function requires 'date-fns-tz' v2 or later.
+        // This function requires 'date-fns-tz' v3 or later.
         const utcDate = fromZonedTime(parsedDate, IST_TIMEZONE);
 
         // Convert the UTC date back to a zoned date object for IST (optional, depends on how you use it later)
         // If you just need the Date object representing the correct moment in time (UTC), utcDate is sufficient.
-        // If you need to format it *as* IST time later, use utcToZonedTime.
-        const zonedDate = toZonedTime(utcDate, IST_TIMEZONE); // Use this if you need to display/compare in IST later
+        // If you need to format it *as* IST time later, use toZonedTime.
+        // const zonedDate = toZonedTime(utcDate, IST_TIMEZONE); // Use this if you need to display/compare in IST later
 
         // For calculations like comparing against 5 AM IST, you often work with the UTC representation
         // or convert the comparison time (5 AM IST) to UTC as well.
 
-        // Let's return the zonedDate object which represents the time in IST.
-        return zonedDate;
+        // Let's return the UTC Date object as it represents the specific moment in time.
+        return utcDate;
 
     } catch (error) {
         // Make sure the error message includes the specific function call that failed if possible
         console.error(`Error parsing time string "${timeString}" for date "${dateKey}":`, error);
         // Consider adding more specific error handling here if needed,
-        // e.g., checking if error is a TypeError related to zonedTimeToUtc.
-        return null; // Return null if parsing fails
+        // e.g., checking if error is a TypeError related to zonedTimeToUtc (though it's now fromZonedTime).
+        // Re-throw the error or return null to signal failure
+        throw new Error(`Failed to parse time "${timeString}". Please use HH:MM AM/PM format.`);
     }
 }
 
@@ -260,8 +266,10 @@ const commands = [
              {
                 name: 'sleeping_time',
                 type: 3, // STRING
-                description: 'Your sleeping time (e.g., 10:30 PM). Use HH:MM AM/PM format.', // Updated description
+                // Updated description to include the "Not Slept" option
+                description: 'Your sleeping time (e.g., 10:30 PM) or type "Not Slept". Use HH:MM AM/PM format if entering a time.',
                 required: true,
+                // Removed .addChoices() to allow free text input
             },
             // New Regulative Principle Options (Required Booleans)
             {
@@ -443,18 +451,21 @@ client.on('interactionCreate', async interaction => {
 
     // Handle the /logpractice command
     if (commandName === 'logpractice') {
+        // Defer the reply as time parsing and saving might take a moment
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] }); // Use ephemeral for privacy
+
         // Get the values provided by the user for each option of the command.
         const day = interaction.options.getInteger('day');
         const month = interaction.options.getInteger('month');
         const year = interaction.options.getInteger('year');
-        const wakingTime = interaction.options.getString('waking_time');
+        const wakingTimeStr = interaction.options.getString('waking_time');
         const chantingRounds = interaction.options.getInteger('chanting_rounds');
         const mangalaAarti = interaction.options.getBoolean('mangala_aarti');
         const morningProgram = interaction.options.getBoolean('morning_program');
         const studyHours = interaction.options.getNumber('study_hours');
         const readingDetails = interaction.options.getString('reading_details'); // Get reading details (string)
         const listeningHours = interaction.options.getNumber('listening_hours'); // Get listening hours (number)
-        const sleepingTime = interaction.options.getString('sleeping_time');
+        const sleepingTimeInput = interaction.options.getString('sleeping_time'); // Get the raw input string
         // Get regulative principle values
         const noMeatEating = interaction.options.getBoolean('no_meat_eating');
         const noGambling = interaction.options.getBoolean('no_gambling');
@@ -468,20 +479,37 @@ client.on('interactionCreate', async interaction => {
 
         // Create Date objects for comparison times (5 AM and 11 PM IST)
         // We need to parse these relative to the *logged date*
-        const fiveAmIST = parseTimeInIST(dateKey, '5:00 AM');
-        const elevenPmIST = parseTimeInIST(dateKey, '11:00 PM'); // 11 PM on the *logged* day
+        let fiveAmIST, elevenPmIST;
+        try {
+            fiveAmIST = parseTimeInIST(dateKey, '5:00 AM');
+            elevenPmIST = parseTimeInIST(dateKey, '11:00 PM'); // 11 PM on the *logged* day
+        } catch (error) {
+             console.error("Error parsing comparison times (5 AM / 11 PM IST):", error);
+             await interaction.editReply({ content: 'Internal error processing comparison times. Please contact bot administrator.', flags: [MessageFlags.Ephemeral] });
+             return;
+        }
+
 
         // Check if the comparison times parsed correctly
         if (!fiveAmIST || !elevenPmIST) {
-            console.error("Error parsing comparison times (5 AM / 11 PM IST). Check parseTimeInIST function and inputs.");
-             await interaction.reply({ content: 'Internal error processing times. Please check bot logs.', flags: [MessageFlags.Ephemeral] });
+            // This check might be redundant if parseTimeInIST throws errors, but good for safety
+            console.error("Comparison times (5 AM / 11 PM IST) are invalid after parsing.");
+             await interaction.editReply({ content: 'Internal error processing times. Please contact bot administrator.', flags: [MessageFlags.Ephemeral] });
             return;
         }
 
         // Parse waking time for the logged date in IST
-        const parsedWakingTime = parseTimeInIST(dateKey, wakingTime);
+        let parsedWakingTime;
+        try {
+            parsedWakingTime = parseTimeInIST(dateKey, wakingTimeStr);
+        } catch (error) {
+             await interaction.editReply({ content: `Invalid waking time format: "${wakingTimeStr}". ${error.message}`, flags: [MessageFlags.Ephemeral] });
+            return;
+        }
+
         if (!parsedWakingTime) {
-             await interaction.reply({ content: `Invalid waking time format: "${wakingTime}". Please use HH:MM AM/PM (e.g., 4:30 AM).`, flags: [MessageFlags.Ephemeral] });
+             // This case should be covered by the catch block now, but keeping for safety
+             await interaction.editReply({ content: `Invalid waking time format: "${wakingTimeStr}". Please use HH:MM AM/PM (e.g., 4:30 AM).`, flags: [MessageFlags.Ephemeral] });
             return;
         }
         // Determine if woke up early (strictly before 5 AM IST on the logged date)
@@ -494,22 +522,53 @@ client.on('interactionCreate', async interaction => {
         previousDayDate.setDate(previousDayDate.getDate() - 1); // Go back one day
         const previousDateKey = format(previousDayDate, 'yyyy-MM-dd'); // Format previous day correctly
 
-        const parsedSleepingTime = parseTimeInIST(previousDateKey, sleepingTime); // Parse sleeping time relative to the PREVIOUS day
+        // --- Handle "Not Slept" for Sleeping Time ---
+        let parsedSleepingTime = null; // Initialize as null
+        let sleptEarlyStatus = false; // Initialize sleptEarlyStatus to false
 
-        if (!parsedSleepingTime) {
-             await interaction.reply({ content: `Invalid sleeping time format: "${sleepingTime}". Please use HH:MM AM/PM (e.g., 10:30 PM).`, flags: [MessageFlags.Ephemeral] });
-            return;
-        }
+        // Check if the user entered "Not Slept" (case-insensitive)
+        if (sleepingTimeInput && sleepingTimeInput.toLowerCase() === 'not slept') {
+            parsedSleepingTime = 'Not Slept'; // Store the specific string "Not Slept"
+            sleptEarlyStatus = false; // Cannot have slept early if not slept
+            console.log(`User ${interaction.user.id} in guild ${interaction.guild?.id} reported "Not Slept" for sleeping time on ${dateKey}.`);
+        } else {
+            // If not "Not Slept", attempt to parse it as a time
+            try {
+                parsedSleepingTime = parseTimeInIST(previousDateKey, sleepingTimeInput);
 
-        // Determine if slept early (before 11 PM IST *on the night before the logged date*)
-        // We need 11 PM IST for the *previous* day for comparison.
-        const elevenPmISTPreviousDay = parseTimeInIST(previousDateKey, '11:00 PM');
-         if (!elevenPmISTPreviousDay) {
-            console.error("Error parsing comparison time (11 PM IST Previous Day).");
-             await interaction.reply({ content: 'Internal error processing sleeping time comparison. Please check bot logs.', flags: [MessageFlags.Ephemeral] });
-            return;
+                // Determine if slept early (before 11 PM IST *on the night before the logged date*)
+                // We need 11 PM IST for the *previous* day for comparison.
+                let elevenPmISTPreviousDay;
+                try {
+                     elevenPmISTPreviousDay = parseTimeInIST(previousDateKey, '11:00 PM');
+                } catch (error) {
+                     console.error("Error parsing comparison time (11 PM IST Previous Day):", error);
+                      await interaction.editReply({ content: 'Internal error processing sleeping time comparison. Please contact bot administrator.', flags: [MessageFlags.Ephemeral] });
+                     return;
+                }
+
+                 if (!elevenPmISTPreviousDay) {
+                    console.error("Comparison time (11 PM IST Previous Day) is invalid after parsing.");
+                     await interaction.editReply({ content: 'Internal error processing sleeping time comparison. Please contact bot administrator.', flags: [MessageFlags.Ephemeral] });
+                    return;
+                }
+                // Only set sleptEarlyStatus if parsing was successful
+                if (parsedSleepingTime) {
+                    sleptEarlyStatus = parsedSleepingTime < elevenPmISTPreviousDay;
+                } else {
+                     // If parsing failed but it wasn't "Not Slept"
+                     await interaction.editReply({ content: `Invalid sleeping time format: "${sleepingTimeInput}". Please use HH:MM AM/PM (e.g., 10:30 PM) or type "Not Slept".`, flags: [MessageFlags.Ephemeral] });
+                     return;
+                }
+
+            } catch (parseError) {
+                 // If parsing fails for a non-"Not Slept" input
+                console.error(`Error parsing sleeping time string "${sleepingTimeInput}":`, parseError);
+                await interaction.editReply({ content: `Error parsing sleeping time: "${sleepingTimeInput}". ${parseError.message}`, flags: [MessageFlags.Ephemeral] });
+                return;
+            }
         }
-        const sleptEarlyStatus = parsedSleepingTime < elevenPmISTPreviousDay;
+         // --- End Handling "Not Slept" ---
 
 
         // --- Data Storage Logic ---
@@ -546,7 +605,7 @@ client.on('interactionCreate', async interaction => {
                     // Logging a past date that is earlier than or same as last logged date,
                     // but *not* the exact same date (which means updating).
                     // Don't reset streak, just keep the current one.
-                    // If it *is* the same date, streak logic handled below.
+                    // If it *is* the same day, streak doesn't change based on this log *yet*.
                     newStreak = currentStreak;
                 }
                 // If dayDifference is 0 (same day), streak doesn't change based on this log *yet*.
@@ -571,7 +630,7 @@ client.on('interactionCreate', async interaction => {
             }
         } else {
              console.error(`Invalid dateKey generated or parsed: ${dateKey}`);
-             await interaction.reply({ content: 'Invalid date provided. Please use valid Day, Month, and Year.', flags: [MessageFlags.Ephemeral] });
+             await interaction.editReply({ content: 'Invalid date provided. Please use valid Day, Month, and Year.', flags: [MessageFlags.Ephemeral] });
             return; // Stop if the date is invalid
         }
 
@@ -582,7 +641,7 @@ client.on('interactionCreate', async interaction => {
 
         // Store the logged data for the specific user and date
         const loggedData = {
-            wakingTime,
+            wakingTime: wakingTimeStr, // Store the original string input
             wokeUpEarlyStatus, // Store calculated boolean
             chantingRounds,
             mangalaAarti,
@@ -591,8 +650,8 @@ client.on('interactionCreate', async interaction => {
             readingDetails,
             listeningHours,
             additionalService,
-            sleepingTime,
-            sleptEarlyStatus, // Store calculated boolean
+            sleepingTime: parsedSleepingTime, // Store the Date object OR the string 'Not Slept'
+            sleptEarlyStatus, // Store calculated boolean (false if 'Not Slept')
             // Store regulative principle values
             noMeatEating,
             noGambling,
@@ -614,14 +673,15 @@ client.on('interactionCreate', async interaction => {
             `**Updated Daily Practice Log for ${interaction.user.username} on ${dateKey}:**\n` :
             `**Daily Practice Logged for ${interaction.user.username} on ${dateKey}:**\n`;
 
-        responseMessage += `Waking Time: ${wakingTime} (Woke Early < 5 AM IST: ${wokeUpEarlyStatus ? 'Yes' : 'No'})\n`; // Include calculated early waking status
+        responseMessage += `Waking Time: ${wakingTimeStr} (Woke Early < 5 AM IST: ${wokeUpEarlyStatus ? 'Yes' : 'No'})\n`; // Include calculated early waking status
         responseMessage += `Chanting Rounds: ${chantingRounds}\n`;
         responseMessage += `Mangala Aarti: ${mangalaAarti ? 'Yes' : 'No'}\n`;
         responseMessage += `Morning Program: ${morningProgram ? 'Yes' : 'No'}\n`;
         responseMessage += `Study Hours: ${studyHours}\n`;
         responseMessage += `Reading: ${readingDetails || 'Not logged'}\n`; // Display reading details, show 'Not logged' if empty
         responseMessage += `Listening Hours: ${listeningHours}\n`;
-        responseMessage += `Sleeping Time: ${sleepingTime} (Slept Early < 11 PM IST Previous Night: ${sleptEarlyStatus ? 'Yes' : 'No'})\n`; // Include calculated early sleeping status
+        // Display Sleeping Time - show 'Not Slept' if it's the string, otherwise format the Date
+        responseMessage += `Sleeping Time: ${parsedSleepingTime === 'Not Slept' ? 'Not Slept' : (parsedSleepingTime ? formatInTimeZone(parsedSleepingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Slept Early < 11 PM IST Previous Night: ${sleptEarlyStatus ? 'Yes' : 'No'})\n`; // Include calculated early sleeping status
          if (additionalService) {
             responseMessage += `Additional Service: ${additionalService}\n`;
         }
@@ -636,7 +696,8 @@ client.on('interactionCreate', async interaction => {
         if (!wokeUpEarlyStatus) {
             encouragementMessages.push("Aim to wake up before 5 AM for maximum spiritual benefit!");
         }
-        if (!sleptEarlyStatus) {
+        // Only show sleeping early encouragement if a time was provided and parsed
+        if (parsedSleepingTime !== 'Not Slept' && !sleptEarlyStatus) {
             encouragementMessages.push("Try to get to bed before 11 PM for restful sleep.");
         }
         if (!readingDetails || readingDetails.trim() === '') {
@@ -666,12 +727,15 @@ client.on('interactionCreate', async interaction => {
 
 
         // --- Respond to the user's command ---
-        // Response is visible to everyone in the channel by default.
-        await interaction.reply({ content: responseMessage });
+        // Use editReply since we deferred earlier (ephemeral)
+        await interaction.editReply({ content: responseMessage });
 
     }
     // Handle the /weeklysummary command
     else if (commandName === 'weeklysummary') {
+        // Defer ephemeral reply
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
         const data = await loadData();
         const userId = interaction.user.id;
         const userData = data.logs[userId] || {}; // Access logs data
@@ -713,7 +777,8 @@ client.on('interactionCreate', async interaction => {
                      booksReadThisWeek.add(log.readingDetails);
                  }
                  if (log.wokeUpEarlyStatus === true) earlyWakingCount++; // Count early waking
-                 if (log.sleptEarlyStatus === true) earlySleepingCount++; // Count early sleeping
+                 // Only count early sleeping if it wasn't "Not Slept" and status is true
+                 if (log.sleepingTime !== 'Not Slept' && log.sleptEarlyStatus === true) earlySleepingCount++; // Count early sleeping
                  // Count each principle followed for that day
                  if (log.noMeatEating === true) principlesFollowedCount++;
                  if (log.noGambling === true) principlesFollowedCount++;
@@ -728,7 +793,7 @@ client.on('interactionCreate', async interaction => {
         const avgListeningHours = loggedDaysCount > 0 ? (totalListeningHours / loggedDaysCount).toFixed(2) : 0;
         const avgScore = loggedDaysCount > 0 ? (totalScore / loggedDaysCount).toFixed(2) : 0; // Average score
         // Average number of principles followed *per logged day* (max 4)
-        const avgPrinciples = loggedDaysCount > 0 ? (principlesFollowedCount / loggedDaysCount).toFixed(2) : 0;
+        const avgPrinciples = loggedDaysCount > 0 ? (principlesFollowedCount / (loggedDaysCount * 4)).toFixed(2) : 0; // Divide by loggedDaysCount * 4 for avg per day out of 4
 
 
         let summaryMessage = `**Weekly Practice Summary for ${interaction.user.username}:**\n`;
@@ -741,14 +806,97 @@ client.on('interactionCreate', async interaction => {
         summaryMessage += `Morning Program Attended: ${morningProgramCount} time(s)\n`;
         summaryMessage += `Woke up early (< 5 AM IST): ${earlyWakingCount} time(s)\n`; // Display early waking count
         summaryMessage += `Slept early (< 11 PM IST Previous Night): ${earlySleepingCount} time(s)\n`; // Display early sleeping count
-         summaryMessage += `Avg. Regulative Principles Followed per Day: ${avgPrinciples} / 4\n`; // Display principles count
+         summaryMessage += `Avg. Regulative Principles Followed per Day: ${avgPrinciples} / 1\n`; // Display principles count (out of 1 point per principle)
+        summaryMessage += `Reading Logged: ${booksReadThisWeek.size > 0 ? Array.from(booksReadThisWeek).join('; ') : 'None'}\n`;
+
+
+        // Use editReply since we deferred earlier (ephemeral)
+        await interaction.editReply({ content: summaryMessage, flags: [MessageFlags.Ephemeral] });
+
+    }
+     // Handle the /monthlysummary command
+     else if (commandName === 'monthlysummary') {
+        // Defer ephemeral reply
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
+        const data = await loadData();
+        const userId = interaction.user.id;
+        const userData = data.logs[userId] || {}; // Access logs data
+
+        // --- Monthly Summary Logic ---
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth(); // 0-indexed month
+
+        const startDate = new Date(year, month, 1); // First day of current month
+        const startKey = format(startDate, 'yyyy-MM-dd');
+        const endKey = format(now, 'yyyy-MM-dd'); // Today's date key
+        const periodName = now.toLocaleString('default', { month: 'long', year: 'numeric' });
+
+        let totalRounds = 0;
+        let totalStudyHours = 0;
+        let totalListeningHours = 0;
+        let mangalaAartiCount = 0;
+        let morningProgramCount = 0;
+        let totalScore = 0;
+        let loggedDaysCount = 0;
+        const booksReadThisMonth = new Set();
+        let earlyWakingCount = 0;
+        let earlySleepingCount = 0;
+        let principlesFollowedCount = 0;
+
+
+        // Iterate through logged practices for the user
+        for (const dateKey in userData) {
+            // Check if the log dateKey is within the current month (inclusive)
+            if (dateKey >= startKey && dateKey <= endKey) {
+                 const log = userData[dateKey];
+                 totalRounds += log.chantingRounds || 0;
+                 totalStudyHours += log.studyHours || 0;
+                 totalListeningHours += log.listeningHours || 0;
+                 if (log.mangalaAarti === true) mangalaAartiCount++;
+                 if (log.morningProgram === true) morningProgramCount++;
+                 totalScore += log.score || 0;
+                 loggedDaysCount++;
+                 if (log.readingDetails && log.readingDetails.trim() !== '') {
+                     booksReadThisMonth.add(log.readingDetails);
+                 }
+                 if (log.wokeUpEarlyStatus === true) earlyWakingCount++;
+                 // Only count early sleeping if it wasn't "Not Slept" and status is true
+                 if (log.sleepingTime !== 'Not Slept' && log.sleptEarlyStatus === true) earlySleepingCount++;
+                 // Count each principle followed for that day
+                 if (log.noMeatEating === true) principlesFollowedCount++;
+                 if (log.noGambling === true) principlesFollowedCount++;
+                 if (log.noIllicitSex === true) principlesFollowedCount++;
+                 if (log.noIntoxication === true) principlesFollowedCount++;
+            }
+        }
+
+        // Calculate averages
+        const avgRounds = loggedDaysCount > 0 ? (totalRounds / loggedDaysCount).toFixed(2) : 0;
+        const avgStudyHours = loggedDaysCount > 0 ? (totalStudyHours / loggedDaysCount).toFixed(2) : 0;
+        const avgListeningHours = loggedDaysCount > 0 ? (totalListeningHours / loggedDaysCount).toFixed(2) : 0;
+        const avgScore = loggedDaysCount > 0 ? (totalScore / loggedDaysCount).toFixed(2) : 0;
+        const avgPrinciples = loggedDaysCount > 0 ? (principlesFollowedCount / (loggedDaysCount * 4)).toFixed(2) : 0;
+
+
+        let summaryMessage = `**Monthly Practice Summary for ${interaction.user.username} (${periodName}):**\n`;
+        summaryMessage += `(Based on ${loggedDaysCount} logged day(s))\n`;
+        summaryMessage += `Total Score: ${totalScore.toFixed(2)} (Avg per logged day: ${avgScore})\n`;
+        summaryMessage += `Total Rounds Chanted: ${totalRounds} (Avg per logged day: ${avgRounds})\n`;
+        summaryMessage += `Total Study Hours: ${totalStudyHours.toFixed(2)} (Avg per logged day: ${avgStudyHours})\n`;
+        summaryMessage += `Total Listening Hours: ${totalListeningHours.toFixed(2)} (Avg per logged day: ${avgListeningHours})\n`;
+        summaryMessage += `Mangala Aarti Attended: ${mangalaAartiCount} time(s)\n`;
+        summaryMessage += `Morning Program Attended: ${morningProgramCount} time(s)\n`;
+        summaryMessage += `Woke up early (< 5 AM IST): ${earlyWakingCount} time(s)\n`;
+        summaryMessage += `Slept early (< 11 PM IST Previous Night): ${earlySleepingCount} time(s)\n`;
+        summaryMessage += `Avg. Regulative Principles Followed per Day: ${avgPrinciples} / 1\n`;
         summaryMessage += `Reading Logged: ${booksReadThisMonth.size > 0 ? Array.from(booksReadThisMonth).join('; ') : 'None'}\n`;
 
 
-        // Use flags for ephemeral message
-        await interaction.reply({ content: summaryMessage, flags: [MessageFlags.Ephemeral] });
-
-    }
+        // Use editReply since we deferred earlier (ephemeral)
+        await interaction.editReply({ content: summaryMessage, flags: [MessageFlags.Ephemeral] });
+     }
      // Handle the /leaderboard command
     else if (commandName === 'leaderboard') {
         // Defer reply because fetching usernames can take time
