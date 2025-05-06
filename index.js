@@ -103,14 +103,13 @@ function calculateScore(log) {
     }
 
     // Waking Early (before 5 AM IST): 1 point if wokeUpEarlyStatus is true
+    // This will be false if wakingTime is 'Not Slept'
     if (log.wokeUpEarlyStatus === true) {
         score += 1;
     }
 
     // Sleeping Early (before 11 PM IST): 1 point if sleptEarlyStatus is true
-    // IMPORTANT: This check is only valid if sleepingTime was successfully parsed as a Date.
-    // The 'Not Slept' case needs to be handled separately or should result in sleptEarlyStatus being false.
-    // The logic in the interaction handler correctly sets sleptEarlyStatus based on parsing result.
+    // This will be false if sleepingTime is 'Not Slept'
     if (log.sleptEarlyStatus === true) {
         score += 1;
     }
@@ -224,8 +223,10 @@ const commands = [
             {
                 name: 'waking_time',
                 type: 3, // STRING
-                description: 'Your waking time (e.g., 4:30 AM). Use HH:MM AM/PM format.',
+                // Updated description to include the "Not Slept" option
+                description: 'Your waking time (e.g., 4:30 AM) or type "Not Slept". Use HH:MM AM/PM format if entering a time.',
                 required: true,
+                // Removed .addChoices() if they were ever here, to allow free text input
             },
             {
                 name: 'chanting_rounds',
@@ -458,7 +459,7 @@ client.on('interactionCreate', async interaction => {
         const day = interaction.options.getInteger('day');
         const month = interaction.options.getInteger('month');
         const year = interaction.options.getInteger('year');
-        const wakingTimeStr = interaction.options.getString('waking_time');
+        const wakingTimeInput = interaction.options.getString('waking_time'); // Get the raw input string
         const chantingRounds = interaction.options.getInteger('chanting_rounds');
         const mangalaAarti = interaction.options.getBoolean('mangala_aarti');
         const morningProgram = interaction.options.getBoolean('morning_program');
@@ -498,22 +499,38 @@ client.on('interactionCreate', async interaction => {
             return;
         }
 
-        // Parse waking time for the logged date in IST
-        let parsedWakingTime;
-        try {
-            parsedWakingTime = parseTimeInIST(dateKey, wakingTimeStr);
-        } catch (error) {
-             await interaction.editReply({ content: `Invalid waking time format: "${wakingTimeStr}". ${error.message}`, flags: [MessageFlags.Ephemeral] });
-            return;
-        }
+        // --- Handle "Not Slept" for Waking Time ---
+        let parsedWakingTime = null; // Initialize as null
+        let wokeUpEarlyStatus = false; // Initialize wokeUpEarlyStatus to false
 
-        if (!parsedWakingTime) {
-             // This case should be covered by the catch block now, but keeping for safety
-             await interaction.editReply({ content: `Invalid waking time format: "${wakingTimeStr}". Please use HH:MM AM/PM (e.g., 4:30 AM).`, flags: [MessageFlags.Ephemeral] });
-            return;
+        // Check if the user entered "Not Slept" (case-insensitive)
+        if (wakingTimeInput && wakingTimeInput.toLowerCase() === 'not slept') {
+            parsedWakingTime = 'Not Slept'; // Store the specific string "Not Slept"
+            wokeUpEarlyStatus = false; // Cannot have woken up early if not slept
+            console.log(`User ${interaction.user.id} in guild ${interaction.guild?.id} reported "Not Slept" for waking time on ${dateKey}.`);
+        } else {
+            // If not "Not Slept", attempt to parse it as a time
+            try {
+                parsedWakingTime = parseTimeInIST(dateKey, wakingTimeInput);
+
+                // Determine if woke up early (strictly before 5 AM IST on the logged date)
+                // Only set wokeUpEarlyStatus if parsing was successful
+                if (parsedWakingTime) {
+                    wokeUpEarlyStatus = parsedWakingTime < fiveAmIST;
+                } else {
+                     // If parsing failed for a non-"Not Slept" input
+                     await interaction.editReply({ content: `Invalid waking time format: "${wakingTimeInput}". Please use HH:MM AM/PM (e.g., 4:30 AM) or type "Not Slept".`, flags: [MessageFlags.Ephemeral] });
+                     return;
+                }
+
+            } catch (parseError) {
+                 // If parsing fails for a non-"Not Slept" input
+                console.error(`Error parsing waking time string "${wakingTimeInput}":`, parseError);
+                await interaction.editReply({ content: `Error parsing waking time: "${wakingTimeInput}". ${parseError.message}`, flags: [MessageFlags.Ephemeral] });
+                return;
+            }
         }
-        // Determine if woke up early (strictly before 5 AM IST on the logged date)
-        const wokeUpEarlyStatus = parsedWakingTime < fiveAmIST;
+        // --- End Handling "Not Slept" for Waking Time ---
 
 
         // Parse sleeping time. This is tricky - it usually refers to the *night before* the logged day.
@@ -641,8 +658,8 @@ client.on('interactionCreate', async interaction => {
 
         // Store the logged data for the specific user and date
         const loggedData = {
-            wakingTime: wakingTimeStr, // Store the original string input
-            wokeUpEarlyStatus, // Store calculated boolean
+            wakingTime: parsedWakingTime, // Store the Date object OR the string 'Not Slept'
+            wokeUpEarlyStatus, // Store calculated boolean (false if 'Not Slept')
             chantingRounds,
             mangalaAarti,
             morningProgram,
@@ -673,7 +690,8 @@ client.on('interactionCreate', async interaction => {
             `**Updated Daily Practice Log for ${interaction.user.username} on ${dateKey}:**\n` :
             `**Daily Practice Logged for ${interaction.user.username} on ${dateKey}:**\n`;
 
-        responseMessage += `Waking Time: ${wakingTimeStr} (Woke Early < 5 AM IST: ${wokeUpEarlyStatus ? 'Yes' : 'No'})\n`; // Include calculated early waking status
+        // Display Waking Time - show 'Not Slept' if it's the string, otherwise format the Date
+        responseMessage += `Waking Time: ${parsedWakingTime === 'Not Slept' ? 'Not Slept' : (parsedWakingTime ? formatInTimeZone(parsedWakingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Woke Early < 5 AM IST: ${wokeUpEarlyStatus ? 'Yes' : 'No'})\n`; // Include calculated early waking status
         responseMessage += `Chanting Rounds: ${chantingRounds}\n`;
         responseMessage += `Mangala Aarti: ${mangalaAarti ? 'Yes' : 'No'}\n`;
         responseMessage += `Morning Program: ${morningProgram ? 'Yes' : 'No'}\n`;
@@ -693,13 +711,20 @@ client.on('interactionCreate', async interaction => {
 
         // --- Add Encouragement Messages ---
         let encouragementMessages = [];
-        if (!wokeUpEarlyStatus) {
+        // Only show waking early encouragement if wakingTime was not 'Not Slept'
+        if (parsedWakingTime !== 'Not Slept' && !wokeUpEarlyStatus) {
             encouragementMessages.push("Aim to wake up before 5 AM for maximum spiritual benefit!");
+        } else if (parsedWakingTime === 'Not Slept') {
+             encouragementMessages.push("Taking rest is important. Hope you can establish a regular waking time soon.");
         }
-        // Only show sleeping early encouragement if a time was provided and parsed
+
+        // Only show sleeping early encouragement if sleepingTime was not 'Not Slept' and status is false
         if (parsedSleepingTime !== 'Not Slept' && !sleptEarlyStatus) {
             encouragementMessages.push("Try to get to bed before 11 PM for restful sleep.");
+        } else if (parsedSleepingTime === 'Not Slept') {
+            encouragementMessages.push("Taking rest is important. Hope you can establish a regular sleeping time soon.");
         }
+
         if (!readingDetails || readingDetails.trim() === '') {
              encouragementMessages.push("Reading is essential! Pick up a spiritual book today.");
         }
@@ -776,7 +801,8 @@ client.on('interactionCreate', async interaction => {
                  if (log.readingDetails && log.readingDetails.trim() !== '') {
                      booksReadThisWeek.add(log.readingDetails);
                  }
-                 if (log.wokeUpEarlyStatus === true) earlyWakingCount++; // Count early waking
+                 // Only count early waking if it wasn't "Not Slept" and status is true
+                 if (log.wakingTime !== 'Not Slept' && log.wokeUpEarlyStatus === true) earlyWakingCount++; // Count early waking
                  // Only count early sleeping if it wasn't "Not Slept" and status is true
                  if (log.sleepingTime !== 'Not Slept' && log.sleptEarlyStatus === true) earlySleepingCount++; // Count early sleeping
                  // Count each principle followed for that day
@@ -861,7 +887,8 @@ client.on('interactionCreate', async interaction => {
                  if (log.readingDetails && log.readingDetails.trim() !== '') {
                      booksReadThisMonth.add(log.readingDetails);
                  }
-                 if (log.wokeUpEarlyStatus === true) earlyWakingCount++;
+                 // Only count early waking if it wasn't "Not Slept" and status is true
+                 if (log.wakingTime !== 'Not Slept' && log.wokeUpEarlyStatus === true) earlyWakingCount++;
                  // Only count early sleeping if it wasn't "Not Slept" and status is true
                  if (log.sleepingTime !== 'Not Slept' && log.sleptEarlyStatus === true) earlySleepingCount++;
                  // Count each principle followed for that day
