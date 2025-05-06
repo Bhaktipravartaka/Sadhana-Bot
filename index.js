@@ -494,6 +494,10 @@ client.on('interactionCreate', async interaction => {
              return;
         }
 
+        // --- ADDED LOGGING ---
+        console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+        // --- END ADDED LOGGING ---
+
 
         // Get the values provided by the user for each option of the command.
         const day = interaction.options.getInteger('day');
