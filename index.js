@@ -481,6 +481,7 @@ client.on('interactionCreate', async interaction => {
 
         // Defer the reply as time parsing and saving might take a moment
         // Removed ephemeral: true to make the reply public
+        // MOVED deferReply to the very beginning of the command handler
         try {
             await interaction.deferReply();
              // --- ADDED LOGGING ---
@@ -525,7 +526,8 @@ client.on('interactionCreate', async interaction => {
             elevenPmIST = parseTimeInIST(dateKey, '11:00 PM'); // 11 PM on the *logged* day
         } catch (error) {
              console.error("Error parsing comparison times (5 AM / 11 PM IST):", error);
-             await interaction.editReply({ content: 'Internal error processing comparison times. Please contact bot administrator.' }); // Removed ephemeral
+             // Use editReply since we already deferred
+             await interaction.editReply({ content: 'Internal error processing comparison times. Please contact bot administrator.' });
              return;
         }
 
@@ -534,7 +536,8 @@ client.on('interactionCreate', async interaction => {
         if (!fiveAmIST || !elevenPmIST) {
             // This check might be redundant if parseTimeInIST throws errors, but good for safety
             console.error("Comparison times (5 AM / 11 PM IST) are invalid after parsing.");
-             await interaction.editReply({ content: 'Internal error processing times. Please contact bot administrator.' }); // Removed ephemeral
+             // Use editReply since we already deferred
+             await interaction.editReply({ content: 'Internal error processing times. Please contact bot administrator.' });
             return;
         }
 
@@ -558,14 +561,16 @@ client.on('interactionCreate', async interaction => {
                     wokeUpEarlyStatus = parsedWakingTime < fiveAmIST;
                 } else {
                      // If parsing failed for a non-"Not Slept" input
-                     await interaction.editReply({ content: `Invalid waking time format: "${wakingTimeInput}". Please use HH:MM AM/PM (e.g., 4:30 AM) or type "Not Slept".` }); // Removed ephemeral
+                     // Use editReply since we already deferred
+                     await interaction.editReply({ content: `Invalid waking time format: "${wakingTimeInput}". Please use HH:MM AM/PM (e.g., 4:30 AM) or type "Not Slept".` });
                      return;
                 }
 
             } catch (parseError) {
                  // If parsing fails for a non-"Not Slept" input
                 console.error(`Error parsing waking time string "${wakingTimeInput}":`, parseError);
-                await interaction.editReply({ content: `Error parsing waking time: "${wakingTimeInput}". ${parseError.message}` }); // Removed ephemeral
+                 // Use editReply since we already deferred
+                await interaction.editReply({ content: `Error parsing waking time: "${wakingTimeInput}". ${parseError.message}` });
                 return;
             }
         }
@@ -599,13 +604,15 @@ client.on('interactionCreate', async interaction => {
                      elevenPmISTPreviousDay = parseTimeInIST(previousDateKey, '11:00 PM');
                 } catch (error) {
                      console.error("Error parsing comparison time (11 PM IST Previous Day):", error);
-                      await interaction.editReply({ content: 'Internal error processing sleeping time comparison. Please contact bot administrator.' }); // Removed ephemeral
+                      // Use editReply since we already deferred
+                      await interaction.editReply({ content: 'Internal error processing sleeping time comparison. Please contact bot administrator.' });
                      return;
                 }
 
                  if (!elevenPmISTPreviousDay) {
                     console.error("Comparison time (11 PM IST Previous Day) is invalid after parsing.");
-                     await interaction.editReply({ content: 'Internal error processing sleeping time comparison. Please contact bot administrator.' }); // Removed ephemeral
+                     // Use editReply since we already deferred
+                     await interaction.editReply({ content: 'Internal error processing sleeping time comparison. Please contact bot administrator.' });
                     return;
                 }
                 // Only set sleptEarlyStatus if parsing was successful
@@ -613,14 +620,16 @@ client.on('interactionCreate', async interaction => {
                     sleptEarlyStatus = parsedSleepingTime < elevenPmISTPreviousDay;
                 } else {
                      // If parsing failed but it wasn't "Not Slept"
-                     await interaction.editReply({ content: `Invalid sleeping time format: "${sleepingTimeInput}". Please use HH:MM AM/PM (e.g., 10:30 PM) or type "Not Slept".` }); // Removed ephemeral
+                     // Use editReply since we already deferred
+                     await interaction.editReply({ content: `Invalid sleeping time format: "${sleepingTimeInput}". Please use HH:MM AM/PM (e.g., 10:30 PM) or type "Not Slept".` });
                      return;
                 }
 
             } catch (parseError) {
                  // If parsing fails for a non-"Not Slept" input
                 console.error(`Error parsing sleeping time string "${sleepingTimeInput}":`, parseError);
-                await interaction.editReply({ content: `Error parsing sleeping time: "${sleepingTimeInput}". ${parseError.message}` }); // Removed ephemeral
+                 // Use editReply since we already deferred
+                await interaction.editReply({ content: `Error parsing sleeping time: "${sleepingTimeInput}". ${parseError.message}` });
                 return;
             }
         }
@@ -686,7 +695,8 @@ client.on('interactionCreate', async interaction => {
             }
         } else {
              console.error(`Invalid dateKey generated or parsed: ${dateKey}`);
-             await interaction.editReply({ content: 'Invalid date provided. Please use valid Day, Month, and Year.' }); // Removed ephemeral
+             // Use editReply since we already deferred
+             await interaction.editReply({ content: 'Invalid date provided. Please use valid Day, Month, and Year.' });
             return; // Stop if the date is invalid
         }
 
