@@ -1,0 +1,31 @@
+{
+  "logs": {
+    "858256756701790258": {
+      "2025-05-04": {
+        "wakingTime": "Not Slept",
+        "wokeUpEarlyStatus": false,
+        "chantingRounds": 8,
+        "mangalaAarti": false,
+        "morningProgram": true,
+        "studyHours": 8,
+        "readingDetails": "bg 5.3",
+        "listeningHours": 4,
+        "additionalService": null,
+        "sleepingTime": "Not Slept",
+        "sleptEarlyStatus": false,
+        "noMeatEating": true,
+        "noGambling": true,
+        "noIllicitSex": true,
+        "noIntoxication": true,
+        "timestamp": "2025-05-06T04:09:13.854Z",
+        "score": 8.2
+      }
+    }
+  },
+  "streaks": {
+    "858256756701790258": {
+      "streakCount": 1,
+      "lastLoggedDateKey": "2025-05-04"
+    }
+  }
+}
