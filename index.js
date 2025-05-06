@@ -475,6 +475,50 @@ const commands = [
         name: 'help',
         description: 'Provides a link to a helpful YouTube video.',
     },
+    // --- New /checkdata command ---
+    {
+        name: 'checkdata',
+        description: 'Check specific data from the database (Admin only).',
+        options: [
+            {
+                name: 'type',
+                type: 3, // STRING
+                description: 'Type of data to check',
+                required: true,
+                choices: [
+                    { name: 'User Log by Date', value: 'user_log_by_date' },
+                    { name: 'User Streak', value: 'user_streak' },
+                    { name: 'Total Sadhana Entries Count', value: 'total_sadhana_count' },
+                    { name: 'Total User Streak Entries Count', value: 'total_streak_count' },
+                ],
+            },
+            {
+                name: 'user',
+                type: 6, // USER
+                description: 'The user to check data for (required for User Log and User Streak).',
+                required: false,
+            },
+             {
+                name: 'day',
+                type: 4, // INTEGER
+                description: 'Day of the month (required for User Log by Date).',
+                required: false,
+            },
+            {
+                name: 'month',
+                type: 4, // INTEGER
+                description: 'Month (1-12) (required for User Log by Date).',
+                required: false,
+            },
+            {
+                name: 'year',
+                type: 4, // INTEGER
+                description: 'Year (e.g., 2023) (required for User Log by Date).',
+                required: false,
+            },
+        ],
+        default_member_permissions: PermissionsBitField.Flags.Administrator.toString(), // Restrict to Admins
+    },
 ];
 
 const rest = new REST({ version: '10' }).setToken(token);
@@ -496,8 +540,8 @@ const rest = new REST({ version: '10' }).setToken(token);
 // --- Bot Event Handlers ---
 
 client.once('ready', () => {
-    console.log(`Logged in as ${client.user.tag}!`);
-    console.log('Bot is online and ready to receive slash commands!');
+    console.log('Logged in as ${client.user.tag}!'); // Corrected closing quote
+    console.log('Bot is online and ready to receive slash commands!'); // Corrected closing quote
 });
 
 client.on('interactionCreate', async interaction => {
@@ -1044,9 +1088,11 @@ client.on('interactionCreate', async interaction => {
                      console.warn(`Could not fetch user/member ${userScore.userId}:`, err.message);
                      try {
                           const user = await client.users.fetch(userScore.userId);
-                          username = user.username;
+                           // Use the fetched user's global name or username
+                           username = user.globalName || user.username;
                      } catch (userErr) {
                            console.error(`Could not fetch user ${userScore.userId} globally:`, userErr);
+                           username = `User ID: ${userScore.userId}`; // Fallback
                      }
                  }
 
@@ -1060,7 +1106,6 @@ client.on('interactionCreate', async interaction => {
     else if (commandName === 'myscore') {
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
-        const period = interaction.options.getString('period');
         const userId = interaction.user.id;
         const username = interaction.user.username;
 
@@ -1068,6 +1113,7 @@ client.on('interactionCreate', async interaction => {
         let startDate;
         let endDate = endOfDay(now); // End of today UTC
 
+        const period = interaction.options.getString('period');
         let periodName;
         let totalScore = 0;
         let loggedDaysCount = 0;
@@ -1212,7 +1258,106 @@ client.on('interactionCreate', async interaction => {
 
         await interaction.reply({ content: responseMessage });
     }
+    // --- New /checkdata command handler ---
+    else if (commandName === 'checkdata') {
+        // Restrict this command to Administrators
+        if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
+             await interaction.reply({ content: 'You do not have permission to use this command.', flags: [MessageFlags.Ephemeral] });
+            return;
+        }
+
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] }); // Defer reply, make it ephemeral
+
+        const dataType = interaction.options.getString('type');
+        const targetUser = interaction.options.getUser('user');
+        const day = interaction.options.getInteger('day');
+        const month = interaction.options.getInteger('month');
+        const year = interaction.options.getInteger('year');
+
+        let responseMessage = `**Data Check Results:**\n\n`;
+
+        try {
+            switch (dataType) {
+                case 'user_log_by_date':
+                    if (!targetUser || day === null || month === null || year === null) {
+                         await interaction.editReply({ content: 'For "User Log by Date", you must provide a user, day, month, and year.' });
+                        return;
+                    }
+                    const checkDate = startOfDay(new Date(year, month - 1, day)); // month is 0-indexed
+                     if (isNaN(checkDate.getTime())) {
+                         await interaction.editReply({ content: 'Invalid date provided for check.' });
+                        return;
+                    }
+
+                    const userLog = await Sadhana.findOne({ userId: targetUser.id, date: checkDate });
+
+                    if (userLog) {
+                        const formattedDate = format(userLog.date, 'yyyy-MM-dd');
+                        responseMessage += `**Log for ${targetUser.username} on ${formattedDate}:**\n`;
+                        // Display Waking Time - show 'Not Slept' if it's the string, otherwise format the Date
+                        responseMessage += `Waking Time: ${userLog.wakingTime === 'Not Slept' ? 'Not Slept' : (userLog.wakingTime ? formatInTimeZone(userLog.wakingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Woke Early < 5 AM IST: ${userLog.wokeUpEarlyStatus ? 'Yes' : 'No'})\n`;
+                        responseMessage += `Japa Rounds: ${userLog.japaRounds}\n`;
+                        responseMessage += `Mangala Aarti: ${userLog.mangalaArati ? 'Yes' : 'No'}\n`;
+                        responseMessage += `Morning Program: ${userLog.morningProgram ? 'Yes' : 'No'}\n`;
+                        responseMessage += `Study Hours: ${userLog.studyHours}\n`;
+                        responseMessage += `Reading: ${userLog.readingDetails || 'Not logged'}\n`;
+                        responseMessage += `Listening Hours: ${userLog.listeningHours}\n`;
+                        // Display Sleeping Time - show 'Not Slept' if it's the string, otherwise format the Date
+                        responseMessage += `Sleeping Time: ${userLog.sleepingTime === 'Not Slept' ? 'Not Slept' : (userLog.sleepingTime ? formatInTimeZone(userLog.sleepingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Slept Early < 11 PM IST Previous Night: ${userLog.sleptEarlyStatus ? 'Yes' : 'No'})\n`;
+                         if (userLog.additionalService) {
+                            responseMessage += `Additional Service: ${userLog.additionalService}\n`;
+                        }
+                         responseMessage += `Regulative Principles Followed: Meat: ${userLog.noMeatEating ? 'Yes' : 'No'}, Gambling: ${userLog.noGambling ? 'Yes' : 'No'}, Illicit Sex: ${userLog.noIllicitSex ? 'Yes' : 'No'}, Intoxication: ${userLog.noIntoxication ? 'Yes' : 'No'}\n`;
+                        responseMessage += `Score: ${userLog.score}\n`;
+                        responseMessage += `Logged At: ${formatInTimeZone(userLog.timestamp, IST_TIMEZONE, 'yyyy-MM-dd HH:mm:ss z')}\n`;
+
+                    } else {
+                        const formattedDate = format(checkDate, 'yyyy-MM-dd');
+                        responseMessage += `No log found for ${targetUser.username} on ${formattedDate}.\n`;
+                    }
+                    break;
+
+                case 'user_streak':
+                    if (!targetUser) {
+                         await interaction.editReply({ content: 'For "User Streak", you must provide a user.' });
+                        return;
+                    }
+                    const userStreak = await UserStreak.findOne({ userId: targetUser.id });
+                    if (userStreak) {
+                        responseMessage += `**Streak for ${targetUser.username}:**\n`;
+                        responseMessage += `Current Streak: ${userStreak.streakCount} day(s)\n`;
+                        responseMessage += `Last Logged Date Key: ${userStreak.lastLoggedDateKey || 'None'}\n`;
+                    } else {
+                        responseMessage += `No streak data found for ${targetUser.username}.\n`;
+                    }
+                    break;
+
+                case 'total_sadhana_count':
+                    const totalSadhanaCount = await Sadhana.countDocuments();
+                    responseMessage += `**Total Sadhana Entries in Database:** ${totalSadhanaCount}\n`;
+                    break;
+
+                case 'total_streak_count':
+                    const totalStreakCount = await UserStreak.countDocuments();
+                    responseMessage += `**Total User Streak Entries in Database:** ${totalStreakCount}\n`;
+                    break;
+
+                default:
+                    responseMessage += 'Invalid data type specified.';
+                    break;
+            }
+        } catch (error) {
+            console.error('Error fetching data for /checkdata command:', error);
+            responseMessage += 'An error occurred while fetching data.';
+             // If a Mongoose timeout happens here, the initial deferReply might prevent a second Unknown Interaction
+             // but the user will get the error message in the ephemeral reply.
+        }
+
+        await interaction.editReply({ content: responseMessage, flags: [MessageFlags.Ephemeral] }); // Edit the deferred reply
+
+    }
 });
+
 
 client.login(token);
 
