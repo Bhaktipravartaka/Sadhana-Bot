@@ -408,9 +408,9 @@ const commands = [
                 choices: [
                     { name: 'Weekly', value: 'weekly' },
                     { name: 'Monthly', value: 'monthly' },
-                ]
+                ],
             },
-        ],
+        ]
     },
     {
         name: 'showscore',
@@ -969,7 +969,7 @@ client.on('interactionCreate', async interaction => {
         let totalRounds = 0;
         let totalStudyHours = 0;
         let totalListeningHours = 0;
-        let mangalaAartiCount = 0;
+        let mangalaAartiCount = 0; // Initialize mangalaAartiCount
         let morningProgramCount = 0;
         let totalScore = 0;
         const booksReadThisWeek = new Set();
@@ -1088,7 +1088,7 @@ client.on('interactionCreate', async interaction => {
         let totalRounds = 0;
         let totalStudyHours = 0;
         let totalListeningHours = 0;
-        let mangalaAratiCount = 0;
+        let mangalaAartiCount = 0; // Initialize mangalaAartiCount
         let morningProgramCount = 0;
         let totalScore = 0;
         const booksReadThisMonth = new Set();
