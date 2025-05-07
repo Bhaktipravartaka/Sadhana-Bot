@@ -695,31 +695,43 @@ client.on('interactionCreate', async interaction => {
         }
 
         // --- Database Interaction Logic (Rewritten for Sequelize) ---
-        // Find or create a Sadhana entry
-        let [sadhanaEntry, created] = await Sadhana.findOrCreate({
-            where: { userId: userId, date: loggedDate },
-            defaults: { // Default values if a new entry is created
-                userId: userId,
-                guildId: guildId,
-                date: loggedDate,
-                japaRounds: japaRounds,
-                wakingTime: parsedWakingTime,
-                wokeUpEarlyStatus: wokeUpEarlyStatus,
-                mangalaArati: mangalaArati,
-                morningProgram: morningProgram,
-                studyHours: studyHours,
-                readingDetails: readingDetails,
-                listeningHours: listeningHours,
-                sleepingTime: parsedSleepingTime,
-                sleptEarlyStatus: sleptEarlyStatus,
-                noMeatEating: noMeatEating,
-                noGambling: noGambling,
-                noIllicitSex: noIllicitSex,
-                noIntoxication: noIntoxication,
-                additionalService: additionalService,
-                score: 0, // Calculate score after updating
-            }
-        });
+        let sadhanaEntry;
+        let created;
+        try {
+             [sadhanaEntry, created] = await Sadhana.findOrCreate({
+                where: { userId: userId, date: loggedDate },
+                defaults: { // Default values if a new entry is created
+                    userId: userId,
+                    guildId: guildId,
+                    date: loggedDate,
+                    japaRounds: japaRounds,
+                    wakingTime: parsedWakingTime,
+                    wokeUpEarlyStatus: wokeUpEarlyStatus,
+                    mangalaArati: mangalaArati,
+                    morningProgram: morningProgram,
+                    studyHours: studyHours,
+                    readingDetails: readingDetails,
+                    listeningHours: listeningHours,
+                    sleepingTime: parsedSleepingTime,
+                    sleptEarlyStatus: sleptEarlyStatus,
+                    noMeatEating: noMeatEating,
+                    noGambling: noGambling,
+                    noIllicitSex: noIllicitSex,
+                    noIntoxication: noIntoxication,
+                    additionalService: additionalService,
+                    score: 0, // Calculate score after updating
+                }
+            });
+        } catch (dbError) {
+            console.error(`Database error during findOrCreate for logpractice:`, dbError);
+             const embed = new EmbedBuilder()
+                 .setColor('#FF0000')
+                 .setTitle('Logging Failed')
+                 .setDescription('An error occurred while accessing the database. Please try again later.');
+             await interaction.editReply({ embeds: [embed] });
+             return;
+        }
+
 
         const isUpdatingExistingLog = !created; // If not created, it was found
 
@@ -747,20 +759,43 @@ client.on('interactionCreate', async interaction => {
         // Calculate and store the score
         sadhanaEntry.score = calculateScore(sadhanaEntry);
 
-        // Save the entry to the database
-        await sadhanaEntry.save();
+        try {
+            // Save the entry to the database
+            await sadhanaEntry.save();
+        } catch (dbError) {
+            console.error(`Database error during save for logpractice:`, dbError);
+             const embed = new EmbedBuilder()
+                 .setColor('#FF0000')
+                 .setTitle('Logging Failed')
+                 .setDescription('An error occurred while saving to the database. Please try again later.');
+             await interaction.editReply({ embeds: [embed] });
+             return;
+        }
 
 
         // --- Chanting Streak Logic (Rewritten for Sequelize) ---
         // Find or create the user's streak entry
-        let [userStreak, streakCreated] = await UserStreak.findOrCreate({
-            where: { userId: userId },
-            defaults: {
-                userId: userId,
-                streakCount: 0,
-                lastLoggedDateKey: null,
-            }
-        });
+        let userStreak;
+        let streakCreated;
+        try {
+             [userStreak, streakCreated] = await UserStreak.findOrCreate({
+                where: { userId: userId },
+                defaults: {
+                    userId: userId,
+                    streakCount: 0,
+                    lastLoggedDateKey: null,
+                }
+            });
+        } catch (dbError) {
+             console.error(`Database error during findOrCreate for streak:`, dbError);
+              const embed = new EmbedBuilder()
+                  .setColor('#FF0000')
+                  .setTitle('Logging Failed')
+                  .setDescription('An error occurred while accessing streak data. Please try again later.');
+              await interaction.editReply({ embeds: [embed] });
+              return;
+        }
+
 
         let currentStreak = userStreak.streakCount;
         const lastLoggedDateKey = userStreak.lastLoggedDateKey;
@@ -800,7 +835,17 @@ client.on('interactionCreate', async interaction => {
              return;
         }
 
-        await userStreak.save();
+        try {
+             await userStreak.save();
+        } catch (dbError) {
+             console.error(`Database error during save for streak:`, dbError);
+              const embed = new EmbedBuilder()
+                  .setColor('#FF0000')
+                  .setTitle('Logging Failed')
+                  .setDescription('An error occurred while saving streak data. Please try again later.');
+              await interaction.editReply({ embeds: [embed] });
+              return;
+        }
 
 
         // --- Create an embed response message ---
@@ -871,8 +916,18 @@ client.on('interactionCreate', async interaction => {
     }
     // Handle other commands (Need to be rewritten for Sequelize)
     else if (commandName === 'weeklysummary') {
-        // Removed ephemeral flag from deferReply
-        await interaction.deferReply();
+        console.log(`[${new Date().toISOString()}] Handling /weeklysummary command for user ${interaction.user.tag}`);
+        console.log(`[${new Date().toISOString()}] Attempting to defer reply for interaction ${interaction.id}`);
+        try {
+            // Removed ephemeral flag from deferReply
+            await interaction.deferReply();
+            console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+        } catch (deferError) {
+             console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+             return;
+        }
+        console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+
 
         const userId = interaction.user.id;
 
@@ -881,16 +936,35 @@ client.on('interactionCreate', async interaction => {
         const sevenDaysAgoStart = startOfDay(addDays(now, -6));
 
         // --- Database Interaction Logic (Rewritten for Sequelize) ---
-        const recentLogs = await Sadhana.findAll({
-            where: {
-                userId: userId,
-                date: {
-                    [Sequelize.Op.gte]: sevenDaysAgoStart,
-                    [Sequelize.Op.lte]: todayStart
-                }
-            },
-            order: [['date', 'ASC']]
-        });
+        let recentLogs;
+        console.log(`[${new Date().toISOString()}] Starting database query for weeklysummary for user ${userId}`);
+        try {
+             recentLogs = await Sadhana.findAll({
+                where: {
+                    userId: userId,
+                    date: {
+                        [Sequelize.Op.gte]: sevenDaysAgoStart,
+                        [Sequelize.Op.lte]: todayStart
+                    }
+                },
+                order: [['date', 'ASC']]
+            });
+            console.log(`[${new Date().toISOString()}] Finished database query for weeklysummary. Found ${recentLogs.length} logs.`);
+        } catch (dbError) {
+             console.error(`[${new Date().toISOString()}] Database error during findAll for weeklysummary:`, dbError);
+              const embed = new EmbedBuilder()
+                  .setColor('#FF0000')
+                  .setTitle('Weekly Summary Failed')
+                  .setDescription('An error occurred while fetching weekly data. Please try again later.');
+              // Check if interaction is still valid before editing reply
+              if (!interaction.replied && !interaction.deferred) {
+                   await interaction.reply({ embeds: [embed] });
+              } else {
+                   await interaction.editReply({ embeds: [embed] });
+              }
+              return;
+        }
+
 
         let totalRounds = 0;
         let totalStudyHours = 0;
@@ -919,6 +993,7 @@ client.on('interactionCreate', async interaction => {
             if (log.noMeatEating === true) principlesFollowedCount++;
             if (log.noGambling === true) principlesFollowedCount++;
             if (log.noIllicitSex === true) principlesFollowedCount++;
+            if (log.noIntendedSex === true) principlesFollowedCount++; // Assuming noIntendedSex is a typo and should be noIllicitSex
             if (log.noIntoxication === true) principlesFollowedCount++;
         }
 
@@ -927,7 +1002,7 @@ client.on('interactionCreate', async interaction => {
         const avgListeningHours = loggedDaysCount > 0 ? (totalListeningHours / loggedDaysCount).toFixed(2) : 0;
         const avgScore = loggedDaysCount > 0 ? (totalScore / loggedDaysCount).toFixed(2) : 0;
         // Calculate average principles per logged day (each day has 4 principles)
-        const avgPrinciplesPerDay = loggedDaysCount > 0 ? (principlesFollowedCount / loggedDaysCount).toFixed(2) : 0;
+        const avgPrinciplesPerDay = loggedDaysCount > 0 ? (principlesFollowedCount / loggedDaysCount / 4).toFixed(2) : 0; // Divide by 4 for average per day
 
 
         // Create an embed for the weekly summary
@@ -948,15 +1023,31 @@ client.on('interactionCreate', async interaction => {
                 { name: 'Reading Logged', value: booksReadThisWeek.size > 0 ? Array.from(booksReadThisWeek).join('; ') : 'None' }
             );
 
-
+        console.log(`[${new Date().toISOString()}] Attempting to editReply for weeklysummary for user ${userId}`);
         // Edited reply to use embeds (removed ephemeral)
-        await interaction.editReply({ embeds: [embed] });
+        try {
+             await interaction.editReply({ embeds: [embed] });
+             console.log(`[${new Date().toISOString()}] Successfully edited reply for weeklysummary for user ${userId}`);
+        } catch (editError) {
+             console.error(`[${new Date().toISOString()}] Error editing reply for weeklysummary for user ${userId}:`, editError);
+        }
+
 
     }
      // Handle the /monthlysummary command (Need to be rewritten for Sequelize)
      else if (commandName === 'monthlysummary') {
-        // Removed ephemeral flag from deferReply
-        await interaction.deferReply();
+        console.log(`[${new Date().toISOString()}] Handling /monthlysummary command for user ${interaction.user.tag}`);
+        console.log(`[${new Date().toISOString()}] Attempting to defer reply for interaction ${interaction.id}`);
+        try {
+            // Removed ephemeral flag from deferReply
+            await interaction.deferReply();
+            console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+        } catch (deferError) {
+             console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+             return;
+        }
+         console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+
 
         const userId = interaction.user.id;
 
@@ -965,16 +1056,34 @@ client.on('interactionCreate', async interaction => {
         const endDate = endOfDay(now);
 
         // --- Database Interaction Logic (Rewritten for Sequelize) ---
-        const monthlyLogs = await Sadhana.findAll({
-            where: {
-                userId: userId,
-                date: {
-                    [Sequelize.Op.gte]: startDate,
-                    [Sequelize.Op.lte]: endDate
-                }
-            },
-            order: [['date', 'ASC']]
-        });
+        let monthlyLogs;
+        console.log(`[${new Date().toISOString()}] Starting database query for monthlysummary for user ${userId}`);
+        try {
+             monthlyLogs = await Sadhana.findAll({
+                where: {
+                    userId: userId,
+                    date: {
+                        [Sequelize.Op.gte]: startDate,
+                        [Sequelize.Op.lte]: endDate
+                    }
+                },
+                order: [['date', 'ASC']]
+            });
+            console.log(`[${new Date().toISOString()}] Finished database query for monthlysummary. Found ${monthlyLogs.length} logs.`);
+        } catch (dbError) {
+             console.error(`[${new Date().toISOString()}] Database error during findAll for monthlysummary:`, dbError);
+              const embed = new EmbedBuilder()
+                  .setColor('#FF0000')
+                  .setTitle('Monthly Summary Failed')
+                  .setDescription('An error occurred while fetching monthly data. Please try again later.');
+              // Check if interaction is still valid before editing reply
+             if (!interaction.replied && !interaction.deferred) {
+                  await interaction.reply({ embeds: [embed] });
+             } else {
+                  await interaction.editReply({ embeds: [embed] });
+             }
+              return;
+        }
 
 
         let totalRounds = 0;
@@ -1012,7 +1121,7 @@ client.on('interactionCreate', async interaction => {
         const avgListeningHours = loggedDaysCount > 0 ? (totalListeningHours / loggedDaysCount).toFixed(2) : 0;
         const avgScore = loggedDaysCount > 0 ? (totalScore / loggedDaysCount).toFixed(2) : 0;
          // Calculate average principles per logged day (each day has 4 principles)
-        const avgPrinciplesPerDay = loggedDaysCount > 0 ? (principlesFollowedCount / loggedDaysCount).toFixed(2) : 0;
+        const avgPrinciplesPerDay = loggedDaysCount > 0 ? (principlesFollowedCount / loggedDaysCount / 4).toFixed(2) : 0; // Divide by 4 for average per day
 
 
         // Create an embed for the monthly summary
@@ -1033,14 +1142,28 @@ client.on('interactionCreate', async interaction => {
                  { name: 'Reading Logged', value: booksReadThisMonth.size > 0 ? Array.from(booksReadThisMonth).join('; ') : 'None' }
              );
 
-
+         console.log(`[${new Date().toISOString()}] Attempting to editReply for monthlysummary for user ${userId}`);
         // Edited reply to use embeds (removed ephemeral)
-        await interaction.editReply({ embeds: [embed] });
+        try {
+             await interaction.editReply({ embeds: [embed] });
+             console.log(`[${new Date().toISOString()}] Successfully edited reply for monthlysummary for user ${userId}`);
+        } catch (editError) {
+             console.error(`[${new Date().toISOString()}] Error editing reply for monthlysummary for user ${userId}:`, editError);
+        }
      }
      // Handle the /leaderboard command (Need to be rewritten for Sequelize)
     else if (commandName === 'leaderboard') {
-        // Removed ephemeral flag from deferReply
-        await interaction.deferReply();
+        console.log(`[${new Date().toISOString()}] Handling /leaderboard command for user ${interaction.user.tag}`);
+        console.log(`[${new Date().toISOString()}] Attempting to defer reply for interaction ${interaction.id}`);
+        try {
+            await interaction.deferReply();
+            console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+        } catch (deferError) {
+             console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+             return;
+        }
+        console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+
 
         const period = interaction.options.getString('period');
         const now = new Date();
@@ -1062,28 +1185,50 @@ client.on('interactionCreate', async interaction => {
                  .setColor('#FF0000') // Red color for error
                  .setTitle('Leaderboard Error')
                  .setDescription('Invalid period specified. Choose "weekly" or "monthly".');
-             await interaction.editReply({ embeds: [embed] });
+              // Check if interaction is still valid before editing reply
+             if (!interaction.replied && !interaction.deferred) {
+                  await interaction.reply({ embeds: [embed] });
+             } else {
+                  await interaction.editReply({ embeds: [embed] });
+             }
             return;
         }
 
         // --- Database Interaction Logic (Rewritten for Sequelize) ---
-        // Use Sequelize's aggregation features
-        const userScores = await Sadhana.findAll({
-             attributes: [
-                'userId',
-                [sequelize.fn('SUM', sequelize.col('score')), 'totalScore'],
-                [sequelize.fn('COUNT', sequelize.fn('DISTINCT', sequelize.literal('DATE("date")'))), 'loggedDaysCount'] // Count distinct dates
-            ],
-            where: {
-                date: {
-                    [Sequelize.Op.gte]: startDate,
-                    [Sequelize.Op.lte]: endDate
-                }
-            },
-            group: ['userId'],
-            order: [[sequelize.literal('"totalScore"'), 'DESC']], // Order by the aggregated totalScore
-            limit: 10 // Limit to top 10
-        });
+        let userScores;
+        console.log(`[${new Date().toISOString()}] Starting database query for leaderboard (${period})`);
+        try {
+             userScores = await Sadhana.findAll({
+                 attributes: [
+                    'userId',
+                    [sequelize.fn('SUM', sequelize.col('score')), 'totalScore'],
+                    [sequelize.fn('COUNT', sequelize.fn('DISTINCT', sequelize.literal('DATE("date")'))), 'loggedDaysCount'] // Count distinct dates
+                ],
+                where: {
+                    date: {
+                        [Sequelize.Op.gte]: startDate,
+                        [Sequelize.Op.lte]: endDate
+                    }
+                },
+                group: ['userId'],
+                order: [[sequelize.literal('"totalScore"'), 'DESC']], // Order by the aggregated totalScore
+                limit: 10 // Limit to top 10
+            });
+             console.log(`[${new Date().toISOString()}] Finished database query for leaderboard. Found ${userScores.length} entries.`);
+        } catch (dbError) {
+             console.error(`[${new Date().toISOString()}] Database error during findAll for leaderboard:`, dbError);
+              const embed = new EmbedBuilder()
+                  .setColor('#FF0000')
+                  .setTitle('Leaderboard Failed')
+                  .setDescription('An error occurred while fetching leaderboard data. Please try again later.');
+              // Check if interaction is still valid before editing reply
+             if (!interaction.replied && !interaction.deferred) {
+                  await interaction.reply({ embeds: [embed] });
+             } else {
+                  await interaction.editReply({ embeds: [embed] });
+             }
+              return;
+        }
 
 
         // Create an embed for the leaderboard
@@ -1117,13 +1262,28 @@ client.on('interactionCreate', async interaction => {
             embed.setDescription(leaderboardDescription);
         }
 
+        console.log(`[${new Date().toISOString()}] Attempting to editReply for leaderboard (${period})`);
         // Edited reply to use embeds (removed ephemeral)
-        await interaction.editReply({ embeds: [embed] });
+        try {
+             await interaction.editReply({ embeds: [embed] });
+             console.log(`[${new Date().toISOString()}] Successfully edited reply for leaderboard (${period})`);
+        } catch (editError) {
+             console.error(`[${new Date().toISOString()}] Error editing reply for leaderboard (${period}):`, editError);
+        }
     }
     // Handle the /myscore command (Need to be rewritten for Sequelize)
     else if (commandName === 'myscore') {
-        // Removed ephemeral flag from deferReply
-        await interaction.deferReply();
+        console.log(`[${new Date().toISOString()}] Handling /myscore command for user ${interaction.user.tag}`);
+        console.log(`[${new Date().toISOString()}] Attempting to defer reply for interaction ${interaction.id}`);
+        try {
+            await interaction.deferReply();
+            console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+        } catch (deferError) {
+             console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+             return;
+        }
+        console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+
 
         const userId = interaction.user.id;
         const username = interaction.user.username;
@@ -1149,20 +1309,44 @@ client.on('interactionCreate', async interaction => {
                  .setColor('#FF0000') // Red color for error
                  .setTitle('My Score Error')
                  .setDescription('Invalid period specified. Choose "weekly" or "monthly".');
-             await interaction.editReply({ embeds: [embed] });
+              // Check if interaction is still valid before editing reply
+             if (!interaction.replied && !interaction.deferred) {
+                  await interaction.reply({ embeds: [embed] });
+             } else {
+                  await interaction.editReply({ embeds: [embed] });
+             }
             return;
         }
 
         // --- Database Interaction Logic (Rewritten for Sequelize) ---
-        const userLogsInPeriod = await Sadhana.findAll({
-            where: {
-                userId: userId,
-                date: {
-                    [Sequelize.Op.gte]: startDate,
-                    [Sequelize.Op.lte]: endDate
+        let userLogsInPeriod;
+        console.log(`[${new Date().toISOString()}] Starting database query for myscore (${period}) for user ${userId}`);
+        try {
+             userLogsInPeriod = await Sadhana.findAll({
+                where: {
+                    userId: userId,
+                    date: {
+                        [Sequelize.Op.gte]: startDate,
+                        [Sequelize.Op.lte]: endDate
+                    }
                 }
-            }
-        });
+            });
+             console.log(`[${new Date().toISOString()}] Finished database query for myscore. Found ${userLogsInPeriod.length} logs.`);
+        } catch (dbError) {
+             console.error(`[${new Date().toISOString()}] Database error during findAll for myscore:`, dbError);
+              const embed = new EmbedBuilder()
+                  .setColor('#FF0000')
+                  .setTitle('My Score Failed')
+                  .setDescription('An error occurred while fetching your score data. Please try again later.');
+              // Check if interaction is still valid before editing reply
+             if (!interaction.replied && !interaction.deferred) {
+                  await interaction.reply({ embeds: [embed] });
+             } else {
+                  await interaction.editReply({ embeds: [embed] });
+             }
+              return;
+        }
+
 
         loggedDaysCount = userLogsInPeriod.length;
         for (const log of userLogsInPeriod) {
@@ -1175,23 +1359,57 @@ client.on('interactionCreate', async interaction => {
             .setTitle(`Your Personal Practice Score (${periodName})`)
             .setDescription(`Total Score: ${totalScore.toFixed(2)} points (${loggedDaysCount} logged day(s))`);
 
-
+        console.log(`[${new Date().toISOString()}] Attempting to editReply for myscore (${period}) for user ${userId}`);
         // Edited reply to use embeds (removed ephemeral)
-        await interaction.editReply({ embeds: [embed] });
+        try {
+             await interaction.editReply({ embeds: [embed] });
+             console.log(`[${new Date().toISOString()}] Successfully edited reply for myscore (${period}) for user ${userId}`);
+        } catch (editError) {
+             console.error(`[${new Date().toISOString()}] Error editing reply for myscore (${period}) for user ${userId}:`, editError);
+        }
+
 
     }
     // Handle the /showscore command (Need to be rewritten for Sequelize)
     else if (commandName === 'showscore') {
-        // Removed ephemeral flag from deferReply
-        await interaction.deferReply();
+        console.log(`[${new Date().toISOString()}] Handling /showscore command for user ${interaction.user.tag}`);
+        console.log(`[${new Date().toISOString()}] Attempting to defer reply for interaction ${interaction.id}`);
+        try {
+            await interaction.deferReply();
+            console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+        } catch (deferError) {
+             console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+             return;
+        }
+        console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+
 
         const targetUser = interaction.options.getUser('user');
         const userId = targetUser.id;
         const username = targetUser.globalName || targetUser.username; // Prefer global name
 
         // --- Database Interaction Logic (Rewritten for Sequelize) ---
-        // Find the user's streak entry
-        const userStreak = await UserStreak.findOne({ where: { userId: userId } });
+        let userStreak;
+        console.log(`[${new Date().toISOString()}] Starting database query for showscore streak for user ${userId}`);
+        try {
+            // Find the user's streak entry
+            userStreak = await UserStreak.findOne({ where: { userId: userId } });
+            console.log(`[${new Date().toISOString()}] Finished database query for showscore streak.`);
+        } catch (dbError) {
+             console.error(`[${new Date().toISOString()}] Database error during findOne for showscore streak:`, dbError);
+              const embed = new EmbedBuilder()
+                  .setColor('#FF0000')
+                  .setTitle('Show Score Failed')
+                  .setDescription('An error occurred while fetching streak data. Please try again later.');
+              // Check if interaction is still valid before editing reply
+             if (!interaction.replied && !interaction.deferred) {
+                  await interaction.reply({ embeds: [embed] });
+             } else {
+                  await interaction.editReply({ embeds: [embed] });
+             }
+              return;
+        }
+
         const currentStreak = userStreak ? userStreak.streakCount : 0;
 
         const now = new Date();
@@ -1199,12 +1417,31 @@ client.on('interactionCreate', async interaction => {
         // Weekly Score
         const weeklyStartDate = startOfDay(addDays(now, -6));
         const weeklyEndDate = endOfDay(now);
-        const weeklyLogs = await Sadhana.findAll({
-            where: {
-                userId: userId,
-                date: { [Sequelize.Op.gte]: weeklyStartDate, [Sequelize.Op.lte]: weeklyEndDate }
-            }
-        });
+        let weeklyLogs;
+        console.log(`[${new Date().toISOString()}] Starting database query for showscore weekly for user ${userId}`);
+        try {
+             weeklyLogs = await Sadhana.findAll({
+                where: {
+                    userId: userId,
+                    date: { [Sequelize.Op.gte]: weeklyStartDate, [Sequelize.Op.lte]: weeklyEndDate }
+                }
+            });
+             console.log(`[${new Date().toISOString()}] Finished database query for showscore weekly. Found ${weeklyLogs.length} logs.`);
+        } catch (dbError) {
+             console.error(`[${new Date().toISOString()}] Database error during findAll for showscore weekly:`, dbError);
+              const embed = new EmbedBuilder()
+                  .setColor('#FF0000')
+                  .setTitle('Show Score Failed')
+                  .setDescription('An error occurred while fetching weekly score data. Please try again later.');
+              // Check if interaction is still valid before editing reply
+             if (!interaction.replied && !interaction.deferred) {
+                  await interaction.reply({ embeds: [embed] });
+             } else {
+                  await interaction.editReply({ embeds: [embed] });
+             }
+              return;
+        }
+
         let weeklyScore = 0;
         let weeklyLoggedDays = weeklyLogs.length;
         for (const log of weeklyLogs) weeklyScore += log.score || 0;
@@ -1212,18 +1449,56 @@ client.on('interactionCreate', async interaction => {
         // Monthly Score
         const monthStartDate = startOfMonth(now);
         const monthlyEndDate = endOfDay(now);
-        const monthlyLogs = await Sadhana.findAll({
-            where: {
-                userId: userId,
-                date: { [Sequelize.Op.gte]: monthStartDate, [Sequelize.Op.lte]: monthlyEndDate }
-            }
-        });
+        let monthlyLogs;
+        console.log(`[${new Date().toISOString()}] Starting database query for showscore monthly for user ${userId}`);
+        try {
+             monthlyLogs = await Sadhana.findAll({
+                where: {
+                    userId: userId,
+                    date: { [Sequelize.Op.gte]: monthStartDate, [Sequelize.Op.lte]: monthlyEndDate }
+                }
+            });
+             console.log(`[${new Date().toISOString()}] Finished database query for showscore monthly. Found ${monthlyLogs.length} logs.`);
+        } catch (dbError) {
+             console.error(`[${new Date().toISOString()}] Database error during findAll for showscore monthly:`, dbError);
+              const embed = new EmbedBuilder()
+                  .setColor('#FF0000')
+                  .setTitle('Show Score Failed')
+                  .setDescription('An error occurred while fetching monthly score data. Please try again later.');
+              // Check if interaction is still valid before editing reply
+             if (!interaction.replied && !interaction.deferred) {
+                  await interaction.reply({ embeds: [embed] });
+             } else {
+                  await interaction.editReply({ embeds: [embed] });
+             }
+              return;
+        }
+
         let monthlyScore = 0;
         let monthlyLoggedDays = monthlyLogs.length;
          for (const log of monthlyLogs) monthlyScore += log.score || 0;
 
         // All-Time Score
-        const allTimeLogs = await Sadhana.findAll({ where: { userId: userId } });
+        let allTimeLogs;
+        console.log(`[${new Date().toISOString()}] Starting database query for showscore all-time for user ${userId}`);
+        try {
+             allTimeLogs = await Sadhana.findAll({ where: { userId: userId } });
+             console.log(`[${new Date().toISOString()}] Finished database query for showscore all-time. Found ${allTimeLogs.length} logs.`);
+        } catch (dbError) {
+             console.error(`[${new Date().toISOString()}] Database error during findAll for showscore all-time:`, dbError);
+              const embed = new EmbedBuilder()
+                  .setColor('#FF0000')
+                  .setTitle('Show Score Failed')
+                  .setDescription('An error occurred while fetching all-time score data. Please try again later.');
+              // Check if interaction is still valid before editing reply
+             if (!interaction.replied && !interaction.deferred) {
+                  await interaction.reply({ embeds: [embed] });
+             } else {
+                  await interaction.editReply({ embeds: [embed] });
+             }
+              return;
+        }
+
         let allTimeScore = 0;
         let allTimeLoggedDays = allTimeLogs.length;
          for (const log of allTimeLogs) allTimeScore += log.score || 0;
@@ -1239,9 +1514,14 @@ client.on('interactionCreate', async interaction => {
                 { name: 'All-Time', value: `${allTimeScore.toFixed(2)} points (${allTimeLoggedDays} logged)`, inline: true }
             );
 
-
+        console.log(`[${new Date().toISOString()}] Attempting to editReply for showscore for user ${userId}`);
         // Edited reply to use embeds (removed ephemeral)
-        await interaction.editReply({ embeds: [embed] });
+        try {
+             await interaction.editReply({ embeds: [embed] });
+             console.log(`[${new Date().toISOString()}] Successfully edited reply for showscore for user ${userId}`);
+        } catch (editError) {
+             console.error(`[${new Date().toISOString()}] Error editing reply for showscore for user ${userId}:`, editError);
+        }
 
     }
      // Handle the /streakset command (Admin only) (Need to be rewritten for Sequelize)
@@ -1255,6 +1535,8 @@ client.on('interactionCreate', async interaction => {
              await interaction.reply({ embeds: [embed] });
             return;
         }
+        console.log(`[${new Date().toISOString()}] Handling /streakset command for user ${interaction.user.tag}`);
+
 
         const targetUser = interaction.options.getUser('user');
         const newStreak = interaction.options.getInteger('streak');
@@ -1273,14 +1555,29 @@ client.on('interactionCreate', async interaction => {
 
         // --- Database Interaction Logic (Rewritten for Sequelize) ---
         // Find or create the user's streak entry
-        let [userStreak, created] = await UserStreak.findOrCreate({
-            where: { userId: targetUserId },
-            defaults: {
-                userId: targetUserId,
-                streakCount: 0,
-                lastLoggedDateKey: null,
-            }
-        });
+        let userStreak;
+        let created;
+        console.log(`[${new Date().toISOString()}] Starting database operation (findOrCreate) for streakset for user ${targetUserId}`);
+        try {
+             [userStreak, created] = await UserStreak.findOrCreate({
+                where: { userId: targetUserId },
+                defaults: {
+                    userId: targetUserId,
+                    streakCount: 0,
+                    lastLoggedDateKey: null,
+                }
+            });
+             console.log(`[${new Date().toISOString()}] Finished database operation (findOrCreate) for streakset.`);
+        } catch (dbError) {
+             console.error(`[${new Date().toISOString()}] Database error during findOrCreate for streakset:`, dbError);
+              const embed = new EmbedBuilder()
+                  .setColor('#FF0000')
+                  .setTitle('Streak Set Failed')
+                  .setDescription('An error occurred while accessing streak data. Please try again later.');
+              await interaction.reply({ embeds: [embed] });
+              return;
+        }
+
 
         // Update the streak count
         userStreak.streakCount = newStreak;
@@ -1294,7 +1591,7 @@ client.on('interactionCreate', async interaction => {
             userStreak.lastLoggedDateKey = yesterdayKey;
 
         } catch (error) {
-             console.error('Error during date calculation for streakset:', error);
+             console.error(`[${new Date().toISOString()}] Error during date calculation for streakset:`, error);
              // Reply with embed for internal error
              const embed = new EmbedBuilder()
                  .setColor('#FF0000') // Red color for error
@@ -1304,7 +1601,20 @@ client.on('interactionCreate', async interaction => {
              return;
         }
 
-        await userStreak.save();
+        console.log(`[${new Date().toISOString()}] Starting database operation (save) for streakset for user ${targetUserId}`);
+        try {
+            await userStreak.save();
+             console.log(`[${new Date().toISOString()}] Finished database operation (save) for streakset.`);
+        } catch (dbError) {
+             console.error(`[${new Date().toISOString()}] Database error during save for streakset:`, dbError);
+              const embed = new EmbedBuilder()
+                  .setColor('#FF0000')
+                  .setTitle('Streak Set Failed')
+                  .setDescription('An error occurred while saving streak data. Please try again later.');
+              await interaction.reply({ embeds: [embed] });
+              return;
+        }
+
 
         // Create an embed for successful streak set
         const embed = new EmbedBuilder()
@@ -1312,12 +1622,18 @@ client.on('interactionCreate', async interaction => {
             .setTitle('Streak Set Successfully')
             .setDescription(`Successfully set ${targetUser.username}'s chanting streak to ${newStreak}. Their last logged date is set for streak calculation.`);
 
-
+        console.log(`[${new Date().toISOString()}] Attempting to reply for streakset for user ${targetUserId}`);
         // Edited reply to use embeds (removed ephemeral)
-        await interaction.reply({ embeds: [embed] });
+        try {
+             await interaction.reply({ embeds: [embed] });
+             console.log(`[${new Date().toISOString()}] Successfully replied for streakset for user ${targetUserId}`);
+        } catch (replyError) {
+             console.error(`[${new Date().toISOString()}] Error replying for streakset for user ${targetUserId}:`, replyError);
+        }
     }
     // Handle the /help command
     else if (commandName === 'help') {
+        console.log(`[${new Date().toISOString()}] Handling /help command for user ${interaction.user.tag}`);
         const youtubeLink = 'Yet to be uploaded'; // Replace with your actual YouTube link
         // Create an embed for the help command
         const embed = new EmbedBuilder()
@@ -1325,8 +1641,14 @@ client.on('interactionCreate', async interaction => {
             .setTitle('Helpful Resources')
             .setDescription(`Here is a helpful video: ${youtubeLink}`);
 
+        console.log(`[${new Date().toISOString()}] Attempting to reply for help command for user ${interaction.user.tag}`);
         // Reply with embed
-        await interaction.reply({ embeds: [embed] });
+        try {
+             await interaction.reply({ embeds: [embed] });
+             console.log(`[${new Date().toISOString()}] Successfully replied for help command for user ${interaction.user.tag}`);
+        } catch (replyError) {
+             console.error(`[${new Date().toISOString()}] Error replying for help command for user ${interaction.user.tag}:`, replyError);
+        }
     }
     // --- New /checkdata command handler (Need to be rewritten for Sequelize) ---
     else if (commandName === 'checkdata') {
@@ -1339,9 +1661,19 @@ client.on('interactionCreate', async interaction => {
              await interaction.reply({ embeds: [embed] });
             return;
         }
+        console.log(`[${new Date().toISOString()}] Handling /checkdata command for user ${interaction.user.tag}`);
 
         // Removed ephemeral flag from deferReply
-        await interaction.deferReply();
+        console.log(`[${new Date().toISOString()}] Attempting to defer reply for interaction ${interaction.id}`);
+        try {
+            await interaction.deferReply();
+            console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+        } catch (deferError) {
+             console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+             return;
+        }
+        console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+
 
         const dataType = interaction.options.getString('type');
         const targetUser = interaction.options.getUser('user');
@@ -1362,6 +1694,7 @@ client.on('interactionCreate', async interaction => {
                     if (!targetUser || day === null || month === null || year === null) {
                          embedDescription = 'For "User Log by Date", you must provide a user, day, month, and year.';
                          embed.setColor('#FF0000'); // Change color for error
+                         embed.setDescription(embedDescription);
                          await interaction.editReply({ embeds: [embed] });
                         return;
                     }
@@ -1369,12 +1702,26 @@ client.on('interactionCreate', async interaction => {
                      if (isNaN(checkDate.getTime())) {
                          embedDescription = 'Invalid date provided for check.';
                          embed.setColor('#FF0000'); // Change color for error
+                         embed.setDescription(embedDescription);
                          await interaction.editReply({ embeds: [embed] });
                         return;
                     }
 
                     // --- Database Interaction Logic (Rewritten for Sequelize) ---
-                    const userLog = await Sadhana.findOne({ where: { userId: targetUser.id, date: checkDate } });
+                    let userLog;
+                    console.log(`[${new Date().toISOString()}] Starting database query for checkdata user_log_by_date for user ${targetUser.id} on ${format(checkDate, 'yyyy-MM-dd')}`);
+                    try {
+                         userLog = await Sadhana.findOne({ where: { userId: targetUser.id, date: checkDate } });
+                         console.log(`[${new Date().toISOString()}] Finished database query for checkdata user_log_by_date. Log found: ${!!userLog}`);
+                    } catch (dbError) {
+                         console.error(`[${new Date().toISOString()}] Database error during findOne for checkdata user_log_by_date:`, dbError);
+                          embedDescription = 'An error occurred while fetching user log data. Please try again later.';
+                          embed.setColor('#FF0000'); // Change color for error
+                          embed.setDescription(embedDescription);
+                          await interaction.editReply({ embeds: [embed] });
+                          return;
+                    }
+
 
                     if (userLog) {
                         const formattedDate = format(userLog.date, 'yyyy-MM-dd');
@@ -1406,11 +1753,25 @@ client.on('interactionCreate', async interaction => {
                     if (!targetUser) {
                          embedDescription = 'For "User Streak", you must provide a user.';
                          embed.setColor('#FF0000'); // Change color for error
+                         embed.setDescription(embedDescription);
                          await interaction.editReply({ embeds: [embed] });
                         return;
                     }
                     // --- Database Interaction Logic (Rewritten for Sequelize) ---
-                    const userStreak = await UserStreak.findOne({ where: { userId: targetUser.id } });
+                    let userStreak;
+                    console.log(`[${new Date().toISOString()}] Starting database query for checkdata user_streak for user ${targetUser.id}`);
+                    try {
+                         userStreak = await UserStreak.findOne({ where: { userId: targetUser.id } });
+                         console.log(`[${new Date().toISOString()}] Finished database query for checkdata user_streak. Streak found: ${!!userStreak}`);
+                    } catch (dbError) {
+                         console.error(`[${new Date().toISOString()}] Database error during findOne for checkdata user_streak:`, dbError);
+                          embedDescription = 'An error occurred while fetching user streak data. Please try again later.';
+                          embed.setColor('#FF0000'); // Change color for error
+                          embed.setDescription(embedDescription);
+                          await interaction.editReply({ embeds: [embed] });
+                          return;
+                    }
+
                     if (userStreak) {
                         embed.setTitle(`Streak for ${targetUser.username}`);
                         embed.addFields(
@@ -1425,14 +1786,38 @@ client.on('interactionCreate', async interaction => {
 
                 case 'total_sadhana_count':
                     // --- Database Interaction Logic (Rewritten for Sequelize) ---
-                    const totalSadhanaCount = await Sadhana.count(); // Use count() for total count
+                    let totalSadhanaCount;
+                    console.log(`[${new Date().toISOString()}] Starting database query for total_sadhana_count`);
+                    try {
+                         totalSadhanaCount = await Sadhana.count(); // Use count() for total count
+                         console.log(`[${new Date().toISOString()}] Finished database query for total_sadhana_count. Count: ${totalSadhanaCount}`);
+                    } catch (dbError) {
+                         console.error(`[${new Date().toISOString()}] Database error during count for total_sadhana_count:`, dbError);
+                          embedDescription = 'An error occurred while fetching total sadhana count. Please try again later.';
+                          embed.setColor('#FF0000'); // Change color for error
+                          embed.setDescription(embedDescription);
+                          await interaction.editReply({ embeds: [embed] });
+                          return;
+                    }
                     embedDescription = `**Total Sadhana Entries in Database:** ${totalSadhanaCount}`;
                     embed.setDescription(embedDescription);
                     break;
 
                 case 'total_streak_count':
                     // --- Database Interaction Logic (Rewritten for Sequelize) ---
-                    const totalStreakCount = await UserStreak.count(); // Use count() for total count
+                    let totalStreakCount;
+                    console.log(`[${new Date().toISOString()}] Starting database query for total_streak_count`);
+                    try {
+                         totalStreakCount = await UserStreak.count(); // Use count() for total count
+                         console.log(`[${new Date().toISOString()}] Finished database query for total_streak_count. Count: ${totalStreakCount}`);
+                    } catch (dbError) {
+                         console.error(`[${new Date().toISOString()}] Database error during count for total_streak_count:`, dbError);
+                          embedDescription = 'An error occurred while fetching total streak count. Please try again later.';
+                          embed.setColor('#FF0000'); // Change color for error
+                          embed.setDescription(embedDescription);
+                          await interaction.editReply({ embeds: [embed] });
+                          return;
+                    }
                     embedDescription = `**Total User Streak Entries in Database:** ${totalStreakCount}`;
                     embed.setDescription(embedDescription);
                     break;
@@ -1444,14 +1829,20 @@ client.on('interactionCreate', async interaction => {
                     break;
             }
         } catch (error) {
-            console.error('Error fetching data for /checkdata command:', error);
-            embedDescription += '\nAn error occurred while fetching data.';
+            console.error(`[${new Date().toISOString()}] An unexpected error occurred in /checkdata command:`, error);
+            embedDescription = 'An unexpected error occurred while fetching data.';
             embed.setColor('#FF0000'); // Change color for error
             embed.setDescription(embedDescription);
         }
 
+        console.log(`[${new Date().toISOString()}] Attempting to editReply for checkdata command`);
         // Edited reply to use embeds (removed ephemeral)
-        await interaction.editReply({ embeds: [embed] });
+        try {
+             await interaction.editReply({ embeds: [embed] });
+             console.log(`[${new Date().toISOString()}] Successfully edited reply for checkdata command`);
+        } catch (editError) {
+             console.error(`[${new Date().toISOString()}] Error editing reply for checkdata command:`, editError);
+        }
 
     }
 });
