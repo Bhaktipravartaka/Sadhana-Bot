@@ -2,7 +2,7 @@
 require('dotenv').config();
 
 // Import necessary classes from discord.js
-const { Client, GatewayIntentBits, REST, Routes, PermissionsBitField, MessageFlags } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, PermissionsBitField, MessageFlags, EmbedBuilder } = require('discord.js'); // Import EmbedBuilder
 
 // Using date-fns for robust date/time parsing and comparison
 // Make sure 'date-fns' is installed: npm install date-fns
@@ -408,7 +408,7 @@ const commands = [
                 choices: [
                     { name: 'Weekly', value: 'weekly' },
                     { name: 'Monthly', value: 'monthly' },
-                ],
+                ]
             },
         ],
     },
@@ -529,6 +529,7 @@ client.on('interactionCreate', async interaction => {
         console.log(`[${new Date().toISOString()}] Attempting to defer reply for interaction ${interaction.id}`);
 
         try {
+            // Removed ephemeral flag from deferReply
             await interaction.deferReply();
             console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
         } catch (deferError) {
@@ -562,7 +563,12 @@ client.on('interactionCreate', async interaction => {
         const loggedDate = startOfDay(new Date(year, month - 1, day));
 
         if (isNaN(loggedDate.getTime())) {
-             await interaction.editReply({ content: 'Invalid date provided. Please use valid Day, Month, and Year.' });
+            // Reply with embed for invalid date
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000') // Red color for error
+                .setTitle('Logging Failed')
+                .setDescription('Invalid date provided. Please use valid Day, Month, and Year.');
+             await interaction.editReply({ embeds: [embed] });
             return;
         }
 
@@ -574,13 +580,23 @@ client.on('interactionCreate', async interaction => {
             elevenPmIST = parseTimeInIST(dateKeyForTimeParsing, '11:00 PM');
         } catch (error) {
              console.error("Error parsing comparison times (5 AM / 11 PM IST):", error);
-             await interaction.editReply({ content: 'Internal error processing comparison times. Please contact bot administrator.' });
+             // Reply with embed for internal error
+             const embed = new EmbedBuilder()
+                 .setColor('#FF0000') // Red color for error
+                 .setTitle('Logging Failed')
+                 .setDescription('Internal error processing comparison times. Please contact bot administrator.');
+             await interaction.editReply({ embeds: [embed] });
              return;
         }
 
         if (!fiveAmIST || !elevenPmIST) {
             console.error("Comparison times (5 AM / 11 PM IST) are invalid after parsing.");
-             await interaction.editReply({ content: 'Internal error processing times. Please contact bot administrator.' });
+             // Reply with embed for internal error
+             const embed = new EmbedBuilder()
+                 .setColor('#FF0000') // Red color for error
+                 .setTitle('Logging Failed')
+                 .setDescription('Internal error processing times. Please contact bot administrator.');
+             await interaction.editReply({ embeds: [embed] });
             return;
         }
 
@@ -596,12 +612,22 @@ client.on('interactionCreate', async interaction => {
                 if (parsedWakingTime) {
                     wokeUpEarlyStatus = parsedWakingTime < fiveAmIST;
                 } else {
-                     await interaction.editReply({ content: `Invalid waking time format: "${wakingTimeInput}". Please use HH:MM AM/PM (e.g., 4:30 AM) or type "Not Slept".` });
+                     // Reply with embed for invalid waking time format
+                     const embed = new EmbedBuilder()
+                         .setColor('#FF0000') // Red color for error
+                         .setTitle('Logging Failed')
+                         .setDescription(`Invalid waking time format: "${wakingTimeInput}". Please use HH:MM AM/PM (e.g., 4:30 AM) or type "Not Slept".`);
+                     await interaction.editReply({ embeds: [embed] });
                      return;
                 }
             } catch (parseError) {
                 console.error(`Error parsing waking time string "${wakingTimeInput}":`, parseError);
-                await interaction.editReply({ content: `Error parsing waking time: "${wakingTimeInput}". ${parseError.message}` });
+                // Reply with embed for parsing error
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000') // Red color for error
+                    .setTitle('Logging Failed')
+                    .setDescription(`Error parsing waking time: "${wakingTimeInput}". ${parseError.message}`);
+                await interaction.editReply({ embeds: [embed] });
                 return;
             }
         }
@@ -624,26 +650,46 @@ client.on('interactionCreate', async interaction => {
                      elevenPmISTPreviousDay = parseTimeInIST(previousDateKey, '11:00 PM');
                 } catch (error) {
                      console.error("Error parsing comparison time (11 PM IST Previous Day):", error);
-                      await interaction.editReply({ content: 'Internal error processing sleeping time comparison. Please contact bot administrator.' });
+                     // Reply with embed for internal error
+                     const embed = new EmbedBuilder()
+                         .setColor('#FF0000') // Red color for error
+                         .setTitle('Logging Failed')
+                         .setDescription('Internal error processing sleeping time comparison. Please contact bot administrator.');
+                      await interaction.editReply({ embeds: [embed] });
                      return;
                 }
 
                  if (!elevenPmISTPreviousDay) {
                     console.error("Comparison time (11 PM IST Previous Day) is invalid after parsing.");
-                     await interaction.editReply({ content: 'Internal error processing sleeping time comparison. Please contact bot administrator.' });
+                     // Reply with embed for internal error
+                     const embed = new EmbedBuilder()
+                         .setColor('#FF0000') // Red color for error
+                         .setTitle('Logging Failed')
+                         .setDescription('Internal error processing sleeping time comparison. Please contact bot administrator.');
+                     await interaction.editReply({ embeds: [embed] });
                     return;
                 }
 
                 if (parsedSleepingTime) {
                     sleptEarlyStatus = parsedSleepingTime < elevenPmISTPreviousDay;
                 } else {
-                     await interaction.editReply({ content: `Invalid sleeping time format: "${sleepingTimeInput}". Please use HH:MM AM/PM (e.g., 10:30 PM) or type "Not Slept".` });
+                     // Reply with embed for invalid sleeping time format
+                     const embed = new EmbedBuilder()
+                         .setColor('#FF0000') // Red color for error
+                         .setTitle('Logging Failed')
+                         .setDescription(`Invalid sleeping time format: "${sleepingTimeInput}". Please use HH:MM AM/PM (e.g., 10:30 PM) or type "Not Slept".`);
+                     await interaction.editReply({ embeds: [embed] });
                      return;
                 }
 
             } catch (parseError) {
                 console.error(`Error parsing sleeping time string "${sleepingTimeInput}":`, parseError);
-                await interaction.editReply({ content: `Error parsing sleeping time: "${sleepingTimeInput}". ${parseError.message}` });
+                // Reply with embed for parsing error
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000') // Red color for error
+                    .setTitle('Logging Failed')
+                    .setDescription(`Error parsing sleeping time: "${sleepingTimeInput}". ${parseError.message}`);
+                await interaction.editReply({ embeds: [embed] });
                 return;
             }
         }
@@ -745,39 +791,43 @@ client.on('interactionCreate', async interaction => {
             }
         } else {
              console.error(`Invalid loggedDate for streak logic: ${loggedDate}`);
+             // Optionally, reply with an embed for this error case
+             const embed = new EmbedBuilder()
+                 .setColor('#FF0000')
+                 .setTitle('Logging Failed')
+                 .setDescription('Internal error processing log date for streak calculation. Please contact bot administrator.');
+             await interaction.editReply({ embeds: [embed] });
              return;
         }
 
         await userStreak.save();
 
 
-        // --- Create a response message ---
+        // --- Create an embed response message ---
         const formattedLoggedDate = format(loggedDate, 'yyyy-MM-dd');
 
-        let responseMessage = isUpdatingExistingLog ?
-            `**Updated Daily Practice Log for ${interaction.user.username} on ${formattedLoggedDate}:**\n` :
-            `**Daily Practice Logged for ${interaction.user.username} on ${formattedLoggedDate}:**\n`;
+        const embed = new EmbedBuilder()
+            .setColor('#0099FF') // Blue color
+            .setTitle(`${isUpdatingExistingLog ? 'Updated' : 'New'} Daily Practice Log for ${interaction.user.username} on ${formattedLoggedDate}`)
+            .addFields(
+                { name: 'Waking Time', value: `${sadhanaEntry.wakingTime === null ? 'Not Slept' : (sadhanaEntry.wakingTime ? formatInTimeZone(sadhanaEntry.wakingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Woke Early < 5 AM IST: ${sadhanaEntry.wokeUpEarlyStatus ? 'Yes' : 'No'})` },
+                { name: 'Japa Rounds', value: sadhanaEntry.japaRounds.toString() },
+                { name: 'Mangala Aarti', value: sadhanaEntry.mangalaArati ? 'Yes' : 'No', inline: true },
+                { name: 'Morning Program', value: sadhanaEntry.morningProgram ? 'Yes' : 'No', inline: true },
+                { name: 'Study Hours', value: sadhanaEntry.studyHours.toString(), inline: true },
+                { name: 'Reading', value: sadhanaEntry.readingDetails || 'Not logged' },
+                { name: 'Listening Hours', value: sadhanaEntry.listeningHours.toString(), inline: true },
+                { name: 'Sleeping Time', value: `${sadhanaEntry.sleepingTime === null ? 'Not Slept' : (sadhanaEntry.sleepingTime ? formatInTimeZone(sadhanaEntry.sleepingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Slept Early < 11 PM IST Previous Night: ${sadhanaEntry.sleptEarlyStatus ? 'Yes' : 'No'})` },
+                { name: 'Regulative Principles Followed', value: `Meat: ${sadhanaEntry.noMeatEating ? 'Yes' : 'No'}, Gambling: ${sadhanaEntry.noGambling ? 'Yes' : 'No'}, Illicit Sex: ${sadhanaEntry.noIllicitSex ? 'Yes' : 'No'}, Intoxication: ${sadhanaEntry.noIntoxication ? 'Yes' : 'No'}` }
+            )
+             .setFooter({ text: `Score for this log: ${sadhanaEntry.score} | Current Chanting Streak: ${userStreak.streakCount} day(s) 🙏` });
 
-        // Display Waking Time - check if it's null (for 'Not Slept') or format the Date
-        responseMessage += `Waking Time: ${sadhanaEntry.wakingTime === null ? 'Not Slept' : (sadhanaEntry.wakingTime ? formatInTimeZone(sadhanaEntry.wakingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Woke Early < 5 AM IST: ${sadhanaEntry.wokeUpEarlyStatus ? 'Yes' : 'No'})\n`;
-        responseMessage += `Japa Rounds: ${sadhanaEntry.japaRounds}\n`;
-        responseMessage += `Mangala Aarti: ${sadhanaEntry.mangalaArati ? 'Yes' : 'No'}\n`;
-        responseMessage += `Morning Program: ${sadhanaEntry.morningProgram ? 'Yes' : 'No'}\n`;
-        responseMessage += `Study Hours: ${sadhanaEntry.studyHours}\n`;
-        responseMessage += `Reading: ${sadhanaEntry.readingDetails || 'Not logged'}\n`;
-        responseMessage += `Listening Hours: ${sadhanaEntry.listeningHours}\n`;
-        // Display Sleeping Time - check if it's null (for 'Not Slept') or format the Date
-        responseMessage += `Sleeping Time: ${sadhanaEntry.sleepingTime === null ? 'Not Slept' : (sadhanaEntry.sleepingTime ? formatInTimeZone(sadhanaEntry.sleepingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Slept Early < 11 PM IST Previous Night: ${sadhanaEntry.sleptEarlyStatus ? 'Yes' : 'No'})\n`;
          if (sadhanaEntry.additionalService) {
-            responseMessage += `Additional Service: ${sadhanaEntry.additionalService}\n`;
-        }
-        responseMessage += `Regulative Principles Followed: Meat: ${sadhanaEntry.noMeatEating ? 'Yes' : 'No'}, Gambling: ${sadhanaEntry.noGambling ? 'Yes' : 'No'}, Illicit Sex: ${sadhanaEntry.noIllicitSex ? 'Yes' : 'No'}, Intoxication: ${sadhanaEntry.noIntoxication ? 'Yes' : 'No'}\n`;
-        responseMessage += `**Score for this log: ${sadhanaEntry.score}**\n`;
-        responseMessage += `**Current Chanting Streak: ${userStreak.streakCount} day(s)!** 🙏\n`;
+             embed.addFields({ name: 'Additional Service', value: sadhanaEntry.additionalService });
+         }
 
-
-        // --- Add Encouragement Messages ---
-        let encouragementMessages = [];
+         // --- Add Encouragement Messages to description or a field ---
+         let encouragementMessages = [];
         if (sadhanaEntry.wakingTime !== null && !sadhanaEntry.wokeUpEarlyStatus) {
             encouragementMessages.push("Aim to wake up before 5 AM IST for maximum spiritual benefit!");
         } else if (sadhanaEntry.wakingTime === null) {
@@ -810,18 +860,19 @@ client.on('interactionCreate', async interaction => {
              encouragementMessages.push(`Remember the importance of following the 4 regulative principles. You logged not following: ${brokenPrinciples.join(', ')}.`);
         }
 
-
         if (encouragementMessages.length > 0) {
-             responseMessage += "\n**Encouragement:**\n" + encouragementMessages.map(msg => `- ${msg}`).join('\n');
+             embed.setDescription("\n**Encouragement:**\n" + encouragementMessages.map(msg => `- ${msg}`).join('\n'));
         }
 
 
-        await interaction.editReply({ content: responseMessage });
+        // Edited reply to use embeds
+        await interaction.editReply({ embeds: [embed] });
 
     }
     // Handle other commands (Need to be rewritten for Sequelize)
     else if (commandName === 'weeklysummary') {
-        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        // Removed ephemeral flag from deferReply
+        await interaction.deferReply();
 
         const userId = interaction.user.id;
 
@@ -875,29 +926,37 @@ client.on('interactionCreate', async interaction => {
         const avgStudyHours = loggedDaysCount > 0 ? (totalStudyHours / loggedDaysCount).toFixed(2) : 0;
         const avgListeningHours = loggedDaysCount > 0 ? (totalListeningHours / loggedDaysCount).toFixed(2) : 0;
         const avgScore = loggedDaysCount > 0 ? (totalScore / loggedDaysCount).toFixed(2) : 0;
-        const avgPrinciples = loggedDaysCount > 0 ? (principlesFollowedCount / (loggedDaysCount * 4)).toFixed(2) : 0;
+        // Calculate average principles per logged day (each day has 4 principles)
+        const avgPrinciplesPerDay = loggedDaysCount > 0 ? (principlesFollowedCount / loggedDaysCount).toFixed(2) : 0;
 
 
-        let summaryMessage = `**Weekly Practice Summary for ${interaction.user.username}:**\n`;
-        summaryMessage += `(Summary based on ${loggedDaysCount} logged day(s) in the last 7 days)\n`;
-        summaryMessage += `Total Score: ${totalScore.toFixed(2)} (Avg per logged day: ${avgScore})\n`;
-        summaryMessage += `Total Rounds Chanted: ${totalRounds} (Avg per logged day: ${avgRounds})\n`;
-        summaryMessage += `Total Study Hours: ${totalStudyHours.toFixed(2)} (Avg per logged day: ${avgStudyHours})\n`;
-        summaryMessage += `Total Listening Hours: ${totalListeningHours.toFixed(2)} (Avg per logged day: ${avgListeningHours})\n`;
-        summaryMessage += `Mangala Aarti Attended: ${mangalaAartiCount} time(s)\n`;
-        summaryMessage += `Morning Program Attended: ${morningProgramCount} time(s)\n`;
-        summaryMessage += `Woke up early (< 5 AM IST): ${earlyWakingCount} time(s)\n`;
-        summaryMessage += `Slept early (< 11 PM IST Previous Night): ${earlySleepingCount} time(s)\n`;
-        summaryMessage += `Avg. Regulative Principles Followed per Day: ${avgPrinciples} / 1\n`;
-        summaryMessage += `Reading Logged: ${booksReadThisWeek.size > 0 ? Array.from(booksReadThisWeek).join('; ') : 'None'}\n`;
+        // Create an embed for the weekly summary
+        const embed = new EmbedBuilder()
+            .setColor('#00AA00') // Green color
+            .setTitle(`Weekly Practice Summary for ${interaction.user.username}`)
+            .setDescription(`(Summary based on ${loggedDaysCount} logged day(s) in the last 7 days)`)
+            .addFields(
+                { name: 'Total Score', value: `${totalScore.toFixed(2)} (Avg per logged day: ${avgScore})` },
+                { name: 'Total Rounds Chanted', value: `${totalRounds} (Avg per logged day: ${avgRounds})` },
+                { name: 'Total Study Hours', value: `${totalStudyHours.toFixed(2)} (Avg per logged day: ${avgStudyHours})`, inline: true },
+                { name: 'Total Listening Hours', value: `${totalListeningHours.toFixed(2)} (Avg per logged day: ${avgListeningHours})`, inline: true },
+                { name: 'Mangala Aarti Attended', value: `${mangalaAartiCount} time(s)`, inline: true },
+                { name: 'Morning Program Attended', value: `${morningProgramCount} time(s)`, inline: true },
+                { name: 'Woke up early (< 5 AM IST)', value: `${earlyWakingCount} time(s)`, inline: true },
+                { name: 'Slept early (< 11 PM IST Previous Night)', value: `${earlySleepingCount} time(s)`, inline: true },
+                 { name: 'Avg. Regulative Principles Followed per Logged Day', value: `${avgPrinciplesPerDay} / 4` }, // Changed to out of 4
+                { name: 'Reading Logged', value: booksReadThisWeek.size > 0 ? Array.from(booksReadThisWeek).join('; ') : 'None' }
+            );
 
 
-        await interaction.editReply({ content: summaryMessage, flags: [MessageFlags.Ephemeral] });
+        // Edited reply to use embeds (removed ephemeral)
+        await interaction.editReply({ embeds: [embed] });
 
     }
      // Handle the /monthlysummary command (Need to be rewritten for Sequelize)
      else if (commandName === 'monthlysummary') {
-        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        // Removed ephemeral flag from deferReply
+        await interaction.deferReply();
 
         const userId = interaction.user.id;
 
@@ -952,27 +1011,35 @@ client.on('interactionCreate', async interaction => {
         const avgStudyHours = loggedDaysCount > 0 ? (totalStudyHours / loggedDaysCount).toFixed(2) : 0;
         const avgListeningHours = loggedDaysCount > 0 ? (totalListeningHours / loggedDaysCount).toFixed(2) : 0;
         const avgScore = loggedDaysCount > 0 ? (totalScore / loggedDaysCount).toFixed(2) : 0;
-        const avgPrinciples = loggedDaysCount > 0 ? (principlesFollowedCount / (loggedDaysCount * 4)).toFixed(2) : 0;
+         // Calculate average principles per logged day (each day has 4 principles)
+        const avgPrinciplesPerDay = loggedDaysCount > 0 ? (principlesFollowedCount / loggedDaysCount).toFixed(2) : 0;
 
 
-        let summaryMessage = `**Monthly Practice Summary for ${interaction.user.username} (${now.toLocaleString('default', { month: 'long', year: 'numeric' })}):**\n`;
-        summaryMessage += `(Based on ${loggedDaysCount} logged day(s))\n`;
-        summaryMessage += `Total Score: ${totalScore.toFixed(2)} (Avg per logged day: ${avgScore})\n`;
-        summaryMessage += `Total Rounds Chanted: ${totalRounds} (Avg per logged day: ${avgRounds})\n`;
-        summaryMessage += `Total Study Hours: ${totalStudyHours.toFixed(2)} (Avg per logged day: ${avgStudyHours})\n`;
-        summaryMessage += `Total Listening Hours: ${totalListeningHours.toFixed(2)} (Avg per logged day: ${avgListeningHours})\n`;
-        summaryMessage += `Mangala Aarti Attended: ${mangalaAartiCount} time(s)\n`;
-        summaryMessage += `Morning Program Attended: ${morningProgramCount} time(s)\n`;
-        summaryMessage += `Woke up early (< 5 AM IST): ${earlyWakingCount} time(s)\n`;
-        summaryMessage += `Slept early (< 11 PM IST Previous Night): ${earlySleepingCount} time(s)\n`;
-        summaryMessage += `Avg. Regulative Principles Followed per Day: ${avgPrinciples} / 1\n`;
-        summaryMessage += `Reading Logged: ${booksReadThisMonth.size > 0 ? Array.from(booksReadThisMonth).join('; ') : 'None'}\n`;
+        // Create an embed for the monthly summary
+         const embed = new EmbedBuilder()
+             .setColor('#FFAA00') // Orange color
+             .setTitle(`Monthly Practice Summary for ${interaction.user.username} (${now.toLocaleString('default', { month: 'long', year: 'numeric' })})`)
+             .setDescription(`(Based on ${loggedDaysCount} logged day(s))`)
+             .addFields(
+                 { name: 'Total Score', value: `${totalScore.toFixed(2)} (Avg per logged day: ${avgScore})` },
+                 { name: 'Total Rounds Chanted', value: `${totalRounds} (Avg per logged day: ${avgRounds})` },
+                 { name: 'Total Study Hours', value: `${totalStudyHours.toFixed(2)} (Avg per logged day: ${avgStudyHours})`, inline: true },
+                 { name: 'Total Listening Hours', value: `${totalListeningHours.toFixed(2)} (Avg per logged day: ${avgListeningHours})`, inline: true },
+                 { name: 'Mangala Aarti Attended', value: `${mangalaAartiCount} time(s)`, inline: true },
+                 { name: 'Morning Program Attended', value: `${morningProgramCount} time(s)`, inline: true },
+                 { name: 'Woke up early (< 5 AM IST)', value: `${earlyWakingCount} time(s)`, inline: true },
+                 { name: 'Slept early (< 11 PM IST Previous Night)', value: `${earlySleepingCount} time(s)`, inline: true },
+                 { name: 'Avg. Regulative Principles Followed per Logged Day', value: `${avgPrinciplesPerDay} / 4` }, // Changed to out of 4
+                 { name: 'Reading Logged', value: booksReadThisMonth.size > 0 ? Array.from(booksReadThisMonth).join('; ') : 'None' }
+             );
 
 
-        await interaction.editReply({ content: summaryMessage, flags: [MessageFlags.Ephemeral] });
+        // Edited reply to use embeds (removed ephemeral)
+        await interaction.editReply({ embeds: [embed] });
      }
      // Handle the /leaderboard command (Need to be rewritten for Sequelize)
     else if (commandName === 'leaderboard') {
+        // Removed ephemeral flag from deferReply
         await interaction.deferReply();
 
         const period = interaction.options.getString('period');
@@ -990,7 +1057,12 @@ client.on('interactionCreate', async interaction => {
             startDate = startOfMonth(now);
             periodName = now.toLocaleString('default', { month: 'long', year: 'numeric' });
         } else {
-             await interaction.editReply({ content: 'Invalid period specified. Choose "weekly" or "monthly".' });
+             // Reply with embed for invalid period
+             const embed = new EmbedBuilder()
+                 .setColor('#FF0000') // Red color for error
+                 .setTitle('Leaderboard Error')
+                 .setDescription('Invalid period specified. Choose "weekly" or "monthly".');
+             await interaction.editReply({ embeds: [embed] });
             return;
         }
 
@@ -1014,43 +1086,44 @@ client.on('interactionCreate', async interaction => {
         });
 
 
-        let leaderboardMessage = `**Spiritual Practice Leaderboard (${periodName}):**\n\n`;
+        // Create an embed for the leaderboard
+        const embed = new EmbedBuilder()
+            .setColor('#FFD700') // Gold color
+            .setTitle(`Spiritual Practice Leaderboard (${periodName})`);
 
         if (userScores.length === 0) {
-            leaderboardMessage += "No practice logs found for this period.";
+            embed.setDescription("No practice logs found for this period.");
         } else {
+            let leaderboardDescription = '';
             for (let i = 0; i < userScores.length; i++) {
                 const userScore = userScores[i];
                 let username = 'Unknown User';
                  try {
                      if (interaction.guild) {
                         const member = await interaction.guild.members.fetch(userScore.userId);
-                        username = member.user.username;
+                         username = member.user.globalName || member.user.username; // Prefer global name
                      } else {
                          const user = await client.users.fetch(userScore.userId);
-                         username = user.username;
+                         username = user.globalName || user.username; // Prefer global name
                      }
                  } catch (err) {
                      console.warn(`Could not fetch user/member ${userScore.userId}:`, err.message);
-                     try {
-                          const user = await client.users.fetch(userScore.userId);
-                           username = user.globalName || user.username;
-                     } catch (userErr) {
-                           console.error(`Could not fetch user ${userScore.userId} globally:`, userErr);
-                           username = `User ID: ${userScore.userId}`;
-                     }
+                     username = `User ID: ${userScore.userId}`;
                  }
 
                 // Access aggregated values using userScore.get('totalScore') and userScore.get('loggedDaysCount')
-                leaderboardMessage += `${i + 1}. **${username}**: ${parseFloat(userScore.get('totalScore')).toFixed(2)} points (${userScore.get('loggedDaysCount')} day(s) logged)\n`;
+                leaderboardDescription += `${i + 1}. **${username}**: ${parseFloat(userScore.get('totalScore')).toFixed(2)} points (${userScore.get('loggedDaysCount')} day(s) logged)\n`;
             }
+            embed.setDescription(leaderboardDescription);
         }
 
-        await interaction.editReply({ content: leaderboardMessage });
+        // Edited reply to use embeds (removed ephemeral)
+        await interaction.editReply({ embeds: [embed] });
     }
     // Handle the /myscore command (Need to be rewritten for Sequelize)
     else if (commandName === 'myscore') {
-        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        // Removed ephemeral flag from deferReply
+        await interaction.deferReply();
 
         const userId = interaction.user.id;
         const username = interaction.user.username;
@@ -1071,7 +1144,12 @@ client.on('interactionCreate', async interaction => {
             startDate = startOfMonth(now);
             periodName = now.toLocaleString('default', { month: 'long', year: 'numeric' });
         } else {
-             await interaction.editReply({ content: 'Invalid period specified. Choose "weekly" or "monthly".', flags: [MessageFlags.Ephemeral] });
+             // Reply with embed for invalid period
+             const embed = new EmbedBuilder()
+                 .setColor('#FF0000') // Red color for error
+                 .setTitle('My Score Error')
+                 .setDescription('Invalid period specified. Choose "weekly" or "monthly".');
+             await interaction.editReply({ embeds: [embed] });
             return;
         }
 
@@ -1091,19 +1169,25 @@ client.on('interactionCreate', async interaction => {
             totalScore += log.score || 0;
         }
 
-        let responseMessage = `**Your Personal Practice Score (${periodName}):**\n\n`;
-        responseMessage += `Total Score: ${totalScore.toFixed(2)} points (${loggedDaysCount} logged day(s))\n`;
+        // Create an embed for the user's score
+        const embed = new EmbedBuilder()
+            .setColor('#8A2BE2') // Blue Violet color
+            .setTitle(`Your Personal Practice Score (${periodName})`)
+            .setDescription(`Total Score: ${totalScore.toFixed(2)} points (${loggedDaysCount} logged day(s))`);
 
-        await interaction.editReply({ content: responseMessage, flags: [MessageFlags.Ephemeral] });
+
+        // Edited reply to use embeds (removed ephemeral)
+        await interaction.editReply({ embeds: [embed] });
 
     }
     // Handle the /showscore command (Need to be rewritten for Sequelize)
     else if (commandName === 'showscore') {
+        // Removed ephemeral flag from deferReply
         await interaction.deferReply();
 
         const targetUser = interaction.options.getUser('user');
         const userId = targetUser.id;
-        const username = targetUser.username;
+        const username = targetUser.globalName || targetUser.username; // Prefer global name
 
         // --- Database Interaction Logic (Rewritten for Sequelize) ---
         // Find the user's streak entry
@@ -1136,7 +1220,7 @@ client.on('interactionCreate', async interaction => {
         });
         let monthlyScore = 0;
         let monthlyLoggedDays = monthlyLogs.length;
-        for (const log of monthlyLogs) monthlyScore += log.score || 0;
+         for (const log of monthlyLogs) monthlyScore += log.score || 0;
 
         // All-Time Score
         const allTimeLogs = await Sadhana.findAll({ where: { userId: userId } });
@@ -1144,20 +1228,31 @@ client.on('interactionCreate', async interaction => {
         let allTimeLoggedDays = allTimeLogs.length;
          for (const log of allTimeLogs) allTimeScore += log.score || 0;
 
+        // Create an embed for showing user's score
+        const embed = new EmbedBuilder()
+            .setColor('#00CED1') // Dark Cyan color
+            .setTitle(`Practice Scores for ${username}`)
+            .addFields(
+                { name: 'Current Chanting Streak', value: `${currentStreak} day(s) 🙏` },
+                { name: 'Weekly (Last 7 Days)', value: `${weeklyScore.toFixed(2)} points (${weeklyLoggedDays} logged)`, inline: true },
+                { name: `Monthly (${now.toLocaleString('default', { month: 'long', year: 'numeric' })})`, value: `${monthlyScore.toFixed(2)} points (${monthlyLoggedDays} logged)`, inline: true },
+                { name: 'All-Time', value: `${allTimeScore.toFixed(2)} points (${allTimeLoggedDays} logged)`, inline: true }
+            );
 
-        let responseMessage = `**Practice Scores for ${username}:**\n\n`;
-        responseMessage += `**Current Chanting Streak:** ${currentStreak} day(s) 🙏\n\n`;
-        responseMessage += `**Weekly (Last 7 Days - ${weeklyLoggedDays} logged):** ${weeklyScore.toFixed(2)} points\n`;
-        responseMessage += `**Monthly (${now.toLocaleString('default', { month: 'long', year: 'numeric' })} - ${monthlyLoggedDays} logged):** ${monthlyScore.toFixed(2)} points\n`;
-        responseMessage += `**All-Time (${allTimeLoggedDays} logged):** ${allTimeScore.toFixed(2)} points\n`;
 
-        await interaction.editReply({ content: responseMessage });
+        // Edited reply to use embeds (removed ephemeral)
+        await interaction.editReply({ embeds: [embed] });
 
     }
      // Handle the /streakset command (Admin only) (Need to be rewritten for Sequelize)
     else if (commandName === 'streakset') {
         if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
-             await interaction.reply({ content: 'You do not have permission to use this command.', flags: [MessageFlags.Ephemeral] });
+             // Reply with embed for insufficient permissions
+             const embed = new EmbedBuilder()
+                 .setColor('#FF0000') // Red color for error
+                 .setTitle('Permission Denied')
+                 .setDescription('You do not have permission to use this command.');
+             await interaction.reply({ embeds: [embed] });
             return;
         }
 
@@ -1165,7 +1260,12 @@ client.on('interactionCreate', async interaction => {
         const newStreak = interaction.options.getInteger('streak');
 
         if (newStreak < 0) {
-             await interaction.reply({ content: 'Streak value cannot be negative.', flags: [MessageFlags.Ephemeral] });
+             // Reply with embed for invalid streak value
+             const embed = new EmbedBuilder()
+                 .setColor('#FF0000') // Red color for error
+                 .setTitle('Streak Set Failed')
+                 .setDescription('Streak value cannot be negative.');
+             await interaction.reply({ embeds: [embed] });
             return;
         }
 
@@ -1186,6 +1286,7 @@ client.on('interactionCreate', async interaction => {
         userStreak.streakCount = newStreak;
 
         try {
+            // Set lastLoggedDateKey to yesterday's date for streak calculation purposes
             const now = new Date();
             const yesterday = addDays(now, -1);
             const yesterdayKey = format(yesterday, 'yyyy-MM-dd');
@@ -1194,29 +1295,53 @@ client.on('interactionCreate', async interaction => {
 
         } catch (error) {
              console.error('Error during date calculation for streakset:', error);
-             await interaction.reply({ content: 'An internal error occurred while setting the streak date. Please contact bot administrator.', flags: [MessageFlags.Ephemeral] });
+             // Reply with embed for internal error
+             const embed = new EmbedBuilder()
+                 .setColor('#FF0000') // Red color for error
+                 .setTitle('Streak Set Failed')
+                 .setDescription('An internal error occurred while setting the streak date. Please contact bot administrator.');
+             await interaction.reply({ embeds: [embed] });
              return;
         }
 
         await userStreak.save();
 
-        await interaction.reply({ content: `Successfully set ${targetUser.username}'s chanting streak to ${newStreak}. Their last logged date is set for streak calculation.`, flags: [MessageFlags.Ephemeral] });
+        // Create an embed for successful streak set
+        const embed = new EmbedBuilder()
+            .setColor('#32CD32') // Lime Green color
+            .setTitle('Streak Set Successfully')
+            .setDescription(`Successfully set ${targetUser.username}'s chanting streak to ${newStreak}. Their last logged date is set for streak calculation.`);
+
+
+        // Edited reply to use embeds (removed ephemeral)
+        await interaction.reply({ embeds: [embed] });
     }
     // Handle the /help command
     else if (commandName === 'help') {
         const youtubeLink = 'Yet to be uploaded'; // Replace with your actual YouTube link
-        const responseMessage = `Here is a helpful video: ${youtubeLink}`;
+        // Create an embed for the help command
+        const embed = new EmbedBuilder()
+            .setColor('#FFFF00') // Yellow color
+            .setTitle('Helpful Resources')
+            .setDescription(`Here is a helpful video: ${youtubeLink}`);
 
-        await interaction.reply({ content: responseMessage });
+        // Reply with embed
+        await interaction.reply({ embeds: [embed] });
     }
     // --- New /checkdata command handler (Need to be rewritten for Sequelize) ---
     else if (commandName === 'checkdata') {
         if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
-             await interaction.reply({ content: 'You do not have permission to use this command.', flags: [MessageFlags.Ephemeral] });
+             // Reply with embed for insufficient permissions
+             const embed = new EmbedBuilder()
+                 .setColor('#FF0000') // Red color for error
+                 .setTitle('Permission Denied')
+                 .setDescription('You do not have permission to use this command.');
+             await interaction.reply({ embeds: [embed] });
             return;
         }
 
-        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        // Removed ephemeral flag from deferReply
+        await interaction.deferReply();
 
         const dataType = interaction.options.getString('type');
         const targetUser = interaction.options.getUser('user');
@@ -1224,18 +1349,27 @@ client.on('interactionCreate', async interaction => {
         const month = interaction.options.getInteger('month');
         const year = interaction.options.getInteger('year');
 
-        let responseMessage = `**Data Check Results:**\n\n`;
+        // Create an embed for the checkdata results
+        const embed = new EmbedBuilder()
+             .setColor('#800080') // Purple color
+            .setTitle('Data Check Results');
+
+        let embedDescription = ''; // Use description or fields for results
 
         try {
             switch (dataType) {
                 case 'user_log_by_date':
                     if (!targetUser || day === null || month === null || year === null) {
-                         await interaction.editReply({ content: 'For "User Log by Date", you must provide a user, day, month, and year.' });
+                         embedDescription = 'For "User Log by Date", you must provide a user, day, month, and year.';
+                         embed.setColor('#FF0000'); // Change color for error
+                         await interaction.editReply({ embeds: [embed] });
                         return;
                     }
                     const checkDate = startOfDay(new Date(year, month - 1, day));
                      if (isNaN(checkDate.getTime())) {
-                         await interaction.editReply({ content: 'Invalid date provided for check.' });
+                         embedDescription = 'Invalid date provided for check.';
+                         embed.setColor('#FF0000'); // Change color for error
+                         await interaction.editReply({ embeds: [embed] });
                         return;
                     }
 
@@ -1244,69 +1378,80 @@ client.on('interactionCreate', async interaction => {
 
                     if (userLog) {
                         const formattedDate = format(userLog.date, 'yyyy-MM-dd');
-                        responseMessage += `**Log for ${targetUser.username} on ${formattedDate}:**\n`;
-                        // Access data using userLog.propertyName
-                        responseMessage += `Waking Time: ${userLog.wakingTime === null ? 'Not Slept' : (userLog.wakingTime ? formatInTimeZone(userLog.wakingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Woke Early < 5 AM IST: ${userLog.wokeUpEarlyStatus ? 'Yes' : 'No'})\n`;
-                        responseMessage += `Japa Rounds: ${userLog.japaRounds}\n`;
-                        responseMessage += `Mangala Aarti: ${userLog.mangalaArati ? 'Yes' : 'No'}\n`;
-                        responseMessage += `Morning Program: ${userLog.morningProgram ? 'Yes' : 'No'}\n`;
-                        responseMessage += `Study Hours: ${userLog.studyHours}\n`;
-                        responseMessage += `Reading: ${userLog.readingDetails || 'Not logged'}\n`;
-                        responseMessage += `Listening Hours: ${userLog.listeningHours}\n`;
-                        responseMessage += `Sleeping Time: ${userLog.sleepingTime === null ? 'Not Slept' : (userLog.sleepingTime ? formatInTimeZone(userLog.sleepingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Slept Early < 11 PM IST Previous Night: ${userLog.sleptEarlyStatus ? 'Yes' : 'No'})\n`;
+                        embed.setTitle(`Log for ${targetUser.username} on ${formattedDate}`);
+                        embed.addFields(
+                            { name: 'Waking Time', value: `${userLog.wakingTime === null ? 'Not Slept' : (userLog.wakingTime ? formatInTimeZone(userLog.wakingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Woke Early < 5 AM IST: ${userLog.wokeUpEarlyStatus ? 'Yes' : 'No'})` },
+                            { name: 'Japa Rounds', value: userLog.japaRounds.toString() },
+                            { name: 'Mangala Aarti', value: userLog.mangalaArati ? 'Yes' : 'No', inline: true },
+                            { name: 'Morning Program', value: userLog.morningProgram ? 'Yes' : 'No', inline: true },
+                            { name: 'Study Hours', value: userLog.studyHours.toString(), inline: true },
+                            { name: 'Reading', value: userLog.readingDetails || 'Not logged' },
+                            { name: 'Listening Hours', value: userLog.listeningHours.toString(), inline: true },
+                            { name: 'Sleeping Time', value: `${userLog.sleepingTime === null ? 'Not Slept' : (userLog.sleepingTime ? formatInTimeZone(userLog.sleepingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Slept Early < 11 PM IST Previous Night: ${userLog.sleptEarlyStatus ? 'Yes' : 'No'})` },
+                            { name: 'Regulative Principles Followed', value: `Meat: ${userLog.noMeatEating ? 'Yes' : 'No'}, Gambling: ${userLog.noGambling ? 'Yes' : 'No'}, Illicit Sex: ${userLog.noIllicitSex ? 'Yes' : 'No'}, Intoxication: ${userLog.noIntoxication ? 'Yes' : 'No'}` },
+                             { name: 'Score', value: userLog.score.toString() }
+                        );
                          if (userLog.additionalService) {
-                            responseMessage += `Additional Service: ${userLog.additionalService}\n`;
+                            embed.addFields({ name: 'Additional Service', value: userLog.additionalService });
                         }
-                         responseMessage += `Regulative Principles Followed: Meat: ${userLog.noMeatEating ? 'Yes' : 'No'}, Gambling: ${userLog.noGambling ? 'Yes' : 'No'}, Illicit Sex: ${userLog.noIllicitSex ? 'Yes' : 'No'}, Intoxication: ${userLog.noIntoxication ? 'Yes' : 'No'}\n`;
-                        responseMessage += `Score: ${userLog.score}\n`;
-                        // If you enabled Sequelize timestamps, you'd access createdAt/updatedAt
-                        // responseMessage += `Logged At: ${formatInTimeZone(userLog.createdAt, IST_TIMEZONE, 'yyyy-MM-dd HH:mm:ss z')}\n`;
-
 
                     } else {
                         const formattedDate = format(checkDate, 'yyyy-MM-dd');
-                        responseMessage += `No log found for ${targetUser.username} on ${formattedDate}.\n`;
+                        embedDescription = `No log found for ${targetUser.username} on ${formattedDate}.`;
+                        embed.setDescription(embedDescription);
                     }
                     break;
 
                 case 'user_streak':
                     if (!targetUser) {
-                         await interaction.editReply({ content: 'For "User Streak", you must provide a user.' });
+                         embedDescription = 'For "User Streak", you must provide a user.';
+                         embed.setColor('#FF0000'); // Change color for error
+                         await interaction.editReply({ embeds: [embed] });
                         return;
                     }
                     // --- Database Interaction Logic (Rewritten for Sequelize) ---
                     const userStreak = await UserStreak.findOne({ where: { userId: targetUser.id } });
                     if (userStreak) {
-                        responseMessage += `**Streak for ${targetUser.username}:**\n`;
-                        responseMessage += `Current Streak: ${userStreak.streakCount} day(s)\n`;
-                        responseMessage += `Last Logged Date Key: ${userStreak.lastLoggedDateKey || 'None'}\n`;
+                        embed.setTitle(`Streak for ${targetUser.username}`);
+                        embed.addFields(
+                            { name: 'Current Streak', value: `${userStreak.streakCount} day(s)` },
+                            { name: 'Last Logged Date Key', value: userStreak.lastLoggedDateKey || 'None' }
+                        );
                     } else {
-                        responseMessage += `No streak data found for ${targetUser.username}.\n`;
+                        embedDescription = `No streak data found for ${targetUser.username}.`;
+                         embed.setDescription(embedDescription);
                     }
                     break;
 
                 case 'total_sadhana_count':
                     // --- Database Interaction Logic (Rewritten for Sequelize) ---
                     const totalSadhanaCount = await Sadhana.count(); // Use count() for total count
-                    responseMessage += `**Total Sadhana Entries in Database:** ${totalSadhanaCount}\n`;
+                    embedDescription = `**Total Sadhana Entries in Database:** ${totalSadhanaCount}`;
+                    embed.setDescription(embedDescription);
                     break;
 
                 case 'total_streak_count':
                     // --- Database Interaction Logic (Rewritten for Sequelize) ---
                     const totalStreakCount = await UserStreak.count(); // Use count() for total count
-                    responseMessage += `**Total User Streak Entries in Database:** ${totalStreakCount}\n`;
+                    embedDescription = `**Total User Streak Entries in Database:** ${totalStreakCount}`;
+                    embed.setDescription(embedDescription);
                     break;
 
                 default:
-                    responseMessage += 'Invalid data type specified.';
+                    embedDescription = 'Invalid data type specified.';
+                    embed.setColor('#FF0000'); // Change color for error
+                    embed.setDescription(embedDescription);
                     break;
             }
         } catch (error) {
             console.error('Error fetching data for /checkdata command:', error);
-            responseMessage += 'An error occurred while fetching data.';
+            embedDescription += '\nAn error occurred while fetching data.';
+            embed.setColor('#FF0000'); // Change color for error
+            embed.setDescription(embedDescription);
         }
 
-        await interaction.editReply({ content: responseMessage, flags: [MessageFlags.Ephemeral] });
+        // Edited reply to use embeds (removed ephemeral)
+        await interaction.editReply({ embeds: [embed] });
 
     }
 });
