@@ -1633,7 +1633,7 @@ client.on('interactionCreate', async interaction => {
     // Handle the /help command
     else if (commandName === 'help') {
         console.log(`[${new Date().toISOString()}] Handling /help command for user ${interaction.user.tag}`);
-        const youtubeLink = 'Yet to be uploaded'; // Replace with your actual YouTube link
+        const youtubeLink = 'https://youtu.be/ZoLCxwCNYZc'; // Replace with your actual YouTube link
         // Create an embed for the help command
         const embed = new EmbedBuilder()
             .setColor('#FFFF00') // Yellow color
