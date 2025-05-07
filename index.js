@@ -993,7 +993,6 @@ client.on('interactionCreate', async interaction => {
             if (log.noMeatEating === true) principlesFollowedCount++;
             if (log.noGambling === true) principlesFollowedCount++;
             if (log.noIllicitSex === true) principlesFollowedCount++;
-            if (log.noIntendedSex === true) principlesFollowedCount++; // Assuming noIntendedSex is a typo and should be noIllicitSex
             if (log.noIntoxication === true) principlesFollowedCount++;
         }
 
@@ -1089,7 +1088,7 @@ client.on('interactionCreate', async interaction => {
         let totalRounds = 0;
         let totalStudyHours = 0;
         let totalListeningHours = 0;
-        let mangalaAartiCount = 0;
+        let mangalaAratiCount = 0;
         let morningProgramCount = 0;
         let totalScore = 0;
         const booksReadThisMonth = new Set();
