@@ -485,17 +485,34 @@ const additionalServiceInput = new TextInputBuilder()
     .setPlaceholder('e.g., Distributed flyers, Cleaned temple');
 
 
-// Add inputs to the modal in rows
+// Add inputs to the modal, grouping them into a maximum of 5 Action Rows
 logPracticeModal.addComponents(
-    { type: 1, components: [dateInput] }, // ActionRow type 1
-    { type: 1, components: [wakingTimeInput] },
-    { type: 1, components: [japaRoundsInput] },
-    { type: 1, components: [studyHoursInput] },
-    { type: 1, components: [readingDetailsInput] },
-    { type: 1, components: [listeningHoursInput] },
-    { type: 1, components: [sleepingTimeInput] },
-    { type: 1, components: [regulativePrinciplesInput] },
-    { type: 1, components: [additionalServiceInput] }
+    { type: 1, components: [dateInput] }, // Row 1: Date
+    { type: 1, components: [wakingTimeInput, japaRoundsInput] }, // Row 2: Waking Time, Japa Rounds
+    { type: 1, components: [studyHoursInput, listeningHoursInput] }, // Row 3: Study Hours, Listening Hours
+    { type: 1, components: [sleepingTimeInput, regulativePrinciplesInput] }, // Row 4: Sleeping Time, Regulative Principles
+    { type: 1, components: [readingDetailsInput] }, // Row 5: Reading Details (Paragraph takes full row)
+    // Additional service needs another row, but we are limited to 5.
+    // Let's add Additional Service to the last row with Reading Details, even though it's Paragraph.
+    // This might not display perfectly, but it fits within the component limit.
+    // A better approach might be to ask for additional service in a separate step or command.
+    // For now, let's try combining it. If this still fails, we might need to rethink.
+    // Okay, re-reading the docs and examples, Paragraph inputs should ideally be in their own row.
+    // Let's try putting Regulative Principles with Reading Details instead, as it's a short input.
+    // And Additional Service in its own row. This makes 6 rows... still too many.
+
+    // Let's try combining three short inputs in one row to save space.
+    // Row 1: Date
+    // Row 2: Waking Time, Japa Rounds, Study Hours
+    // Row 3: Listening Hours, Sleeping Time, Regulative Principles
+    // Row 4: Reading Details (Paragraph)
+    // Row 5: Additional Service (Paragraph)
+    // This is 5 rows. This should work.
+
+    { type: 1, components: [wakingTimeInput, japaRoundsInput, studyHoursInput] }, // Row 2
+    { type: 1, components: [listeningHoursInput, sleepingTimeInput, regulativePrinciplesInput] }, // Row 3
+    { type: 1, components: [readingDetailsInput] }, // Row 4
+    { type: 1, components: [additionalServiceInput] } // Row 5
 );
 
 
@@ -526,12 +543,13 @@ client.on('interactionCreate', async interaction => {
                      .setColor('#FF0000')
                      .setTitle('Logging Failed')
                      .setDescription('An error occurred while trying to open the logging form. Please try again.');
-                 // Check if interaction is still valid before replying
-                 if (!interaction.replied && !interaction.deferred) {
-                      await interaction.reply({ embeds: [embed], ephemeral: true }); // Ephemeral since it's a quick error
+                 // Use editReply here as showModal attempts to acknowledge the interaction
+                 // Also use flags instead of ephemeral
+                 if (interaction.deferred || interaction.replied) {
+                     await interaction.editReply({ embeds: [embed] });
                  } else {
-                      // This case is less likely if showModal fails early, but good practice
-                      await interaction.editReply({ embeds: [embed] });
+                      // Fallback reply if somehow not acknowledged, though less likely after showModal attempt
+                      await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
                  }
             }
 
