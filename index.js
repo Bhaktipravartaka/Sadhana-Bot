@@ -269,21 +269,9 @@ const commands = [
         description: 'Log your daily spiritual practices.',
         options: [
             {
-                name: 'day',
-                type: 4, // INTEGER
-                description: 'Day of the month (e.g., 15)',
-                required: true,
-            },
-            {
-                name: 'month',
-                type: 4, // INTEGER
-                description: 'Month (1-12)',
-                required: true,
-            },
-            {
-                name: 'year',
-                type: 4, // INTEGER
-                description: 'Year (e.g., 2023)',
+                name: 'date', // Combined date option
+                type: 3, // STRING
+                description: 'Date of the practice (e.g., 07/05/2025)',
                 required: true,
             },
             {
@@ -403,10 +391,10 @@ const commands = [
                 required: true,
                 choices: [
                     { name: 'Weekly', value: 'weekly' },
-                    { name: 'Monthly', value: 'monthly' },
-                ],
-            },
-        ],
+                    { name: 'Monthly', value: 'monthly',
+                },
+            ],
+        },
     },
     {
         name: 'showscore',
@@ -466,21 +454,28 @@ const commands = [
                 required: false,
             },
              {
+                name: 'date_string', // New option for date string
+                type: 3, // STRING
+                description: 'Date of the log (e.g., 07/05/2025) (required for User Log by Date).',
+                required: false, // Make required true in handler logic
+            },
+            // Kept these options but made them not required, handler logic will prioritize date_string
+             {
                 name: 'day',
                 type: 4, // INTEGER
-                description: 'Day of the month (required for User Log by Date).',
+                description: 'Day of the month (optional, use date_string instead).',
                 required: false,
             },
             {
                 name: 'month',
                 type: 4, // INTEGER
-                description: 'Month (1-12) (required for User Log by Date).',
+                description: 'Month (1-12) (optional, use date_string instead).',
                 required: false,
             },
             {
                 name: 'year',
                 type: 4, // INTEGER
-                description: 'Year (e.g., 2023) (required for User Log by Date).',
+                description: 'Year (e.g., 2023) (optional, use date_string instead).',
                 required: false,
             },
         ],
@@ -536,14 +531,9 @@ client.on('interactionCreate', async interaction => {
         console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
         // Get the values provided by the user
-        const day = interaction.options.getInteger('day');
-        const month = interaction.options.getInteger('month');
-        const year = interaction.options.getInteger('year');
+        const dateString = interaction.options.getString('date'); // Get date as a string
         const wakingTimeInput = interaction.options.getString('waking_time');
         const japaRounds = interaction.options.getInteger('japa_rounds');
-        // Removed mangalaArati and morningProgram options retrieval
-        // const mangalaArati = interaction.options.getBoolean('mangala_aarti');
-        // const morningProgram = interaction.options.getBoolean('morning_program');
         const studyHours = interaction.options.getNumber('study_hours');
         const readingDetails = interaction.options.getString('reading_details');
         const listeningHours = interaction.options.getNumber('listening_hours');
@@ -557,17 +547,36 @@ client.on('interactionCreate', async interaction => {
         const userId = interaction.user.id;
         const guildId = interaction.guild?.id;
 
-        const loggedDate = startOfDay(new Date(year, month - 1, day));
+        let loggedDate;
+        try {
+            // Parse the date string in dd/MM/yyyy format
+            const parsedDate = parse(dateString, 'dd/MM/yyyy', new Date()); // Parse with base date
 
-        if (isNaN(loggedDate.getTime())) {
-            // Reply with embed for invalid date
-            const embed = new EmbedBuilder()
-                .setColor('#FF0000') // Red color for error
-                .setTitle('Logging Failed')
-                .setDescription('Invalid date provided. Please use valid Day, Month, and Year.');
+            if (isNaN(parsedDate.getTime())) {
+                 // Reply with embed for invalid date format
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000') // Red color for error
+                     .setTitle('Logging Failed')
+                     .setDescription(`Invalid date format: "${dateString}". Please use dd/mm/yyyy format (e.g., 07/05/2025).`);
+                 await interaction.editReply({ embeds: [embed] });
+                 return;
+            }
+
+             // Set the time to the start of the day in IST
+             loggedDate = startOfDay(toZonedTime(parsedDate, IST_TIMEZONE));
+
+
+        } catch (parseError) {
+             console.error(`Error parsing date string "${dateString}":`, parseError);
+             // Reply with embed for parsing error
+             const embed = new EmbedBuilder()
+                 .setColor('#FF0000') // Red color for error
+                 .setTitle('Logging Failed')
+                 .setDescription(`Error parsing date: "${dateString}". Please use dd/mm/yyyy format (e.g., 07/05/2025).`);
              await interaction.editReply({ embeds: [embed] });
-            return;
+             return;
         }
+
 
         const dateKeyForTimeParsing = format(loggedDate, 'yyyy-MM-dd');
 
@@ -1681,9 +1690,11 @@ client.on('interactionCreate', async interaction => {
 
         const dataType = interaction.options.getString('type');
         const targetUser = interaction.options.getUser('user');
-        const day = interaction.options.getInteger('day');
-        const month = interaction.options.getInteger('month');
-        const year = interaction.options.getInteger('year');
+        const dateString = interaction.options.getString('date_string'); // Get date string for checkdata
+        const day = interaction.options.getInteger('day'); // Keep for fallback/alternative
+        const month = interaction.options.getInteger('month'); // Keep for fallback/alternative
+        const year = interaction.options.getInteger('year'); // Keep for fallback/alternative
+
 
         // Create an embed for the checkdata results
         const embed = new EmbedBuilder()
@@ -1695,21 +1706,56 @@ client.on('interactionCreate', async interaction => {
         try {
             switch (dataType) {
                 case 'user_log_by_date':
-                    if (!targetUser || day === null || month === null || year === null) {
-                         embedDescription = 'For "User Log by Date", you must provide a user, day, month, and year.';
+                    if (!targetUser) {
+                         embedDescription = 'For "User Log by Date", you must provide a user.';
                          embed.setColor('#FF0000'); // Change color for error
                          embed.setDescription(embedDescription);
                          await interaction.editReply({ embeds: [embed] });
                         return;
                     }
-                    const checkDate = startOfDay(new Date(year, month - 1, day));
-                     if (isNaN(checkDate.getTime())) {
-                         embedDescription = 'Invalid date provided for check.';
+
+                    let checkDate;
+                    if (dateString) {
+                        try {
+                            // Parse the date string in dd/MM/yyyy format
+                            const parsedDate = parse(dateString, 'dd/MM/yyyy', new Date()); // Parse with base date
+
+                            if (isNaN(parsedDate.getTime())) {
+                                embedDescription = `Invalid date format: "${dateString}". Please use dd/mm/yyyy format (e.g., 07/05/2025) or provide day, month, and year.`;
+                                embed.setColor('#FF0000'); // Change color for error
+                                embed.setDescription(embedDescription);
+                                await interaction.editReply({ embeds: [embed] });
+                                return;
+                            }
+                            // Set the time to the start of the day in IST
+                            checkDate = startOfDay(toZonedTime(parsedDate, IST_TIMEZONE));
+
+                        } catch (parseError) {
+                             console.error(`Error parsing date string "${dateString}" for checkdata:`, parseError);
+                             embedDescription = `Error parsing date: "${dateString}". Please use dd/mm/yyyy format (e.g., 07/05/2025) or provide day, month, and year.`;
+                             embed.setColor('#FF0000'); // Change color for error
+                             embed.setDescription(embedDescription);
+                             await interaction.editReply({ embeds: [embed] });
+                             return;
+                        }
+
+                    } else if (day !== null && month !== null && year !== null) {
+                        checkDate = startOfDay(new Date(year, month - 1, day));
+                         if (isNaN(checkDate.getTime())) {
+                             embedDescription = 'Invalid date provided for check (using day, month, year).';
+                             embed.setColor('#FF0000'); // Change color for error
+                             embed.setDescription(embedDescription);
+                             await interaction.editReply({ embeds: [embed] });
+                            return;
+                        }
+                    } else {
+                         embedDescription = 'For "User Log by Date", you must provide either a date string (dd/mm/yyyy) or a day, month, and year.';
                          embed.setColor('#FF0000'); // Change color for error
                          embed.setDescription(embedDescription);
                          await interaction.editReply({ embeds: [embed] });
                         return;
                     }
+
 
                     // --- Database Interaction Logic (Rewritten for Sequelize) ---
                     let userLog;
