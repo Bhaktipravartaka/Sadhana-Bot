@@ -486,33 +486,36 @@ const additionalServiceInput = new TextInputBuilder()
 
 
 // Add inputs to the modal, grouping them into a maximum of 5 Action Rows
+// Each ActionRow can hold up to 5 components, but TextInputStyle.Paragraph takes up the full row width.
 logPracticeModal.addComponents(
-    { type: 1, components: [dateInput] }, // Row 1: Date
-    { type: 1, components: [wakingTimeInput, japaRoundsInput] }, // Row 2: Waking Time, Japa Rounds
-    { type: 1, components: [studyHoursInput, listeningHoursInput] }, // Row 3: Study Hours, Listening Hours
-    { type: 1, components: [sleepingTimeInput, regulativePrinciplesInput] }, // Row 4: Sleeping Time, Regulative Principles
-    { type: 1, components: [readingDetailsInput] }, // Row 5: Reading Details (Paragraph takes full row)
-    // Additional service needs another row, but we are limited to 5.
-    // Let's add Additional Service to the last row with Reading Details, even though it's Paragraph.
-    // This might not display perfectly, but it fits within the component limit.
-    // A better approach might be to ask for additional service in a separate step or command.
-    // For now, let's try combining it. If this still fails, we might need to rethink.
-    // Okay, re-reading the docs and examples, Paragraph inputs should ideally be in their own row.
-    // Let's try putting Regulative Principles with Reading Details instead, as it's a short input.
-    // And Additional Service in its own row. This makes 6 rows... still too many.
+    { type: 1, components: [dateInput] }, // Row 1: Date (Short)
+    { type: 1, components: [wakingTimeInput, japaRoundsInput] }, // Row 2: Waking Time, Japa Rounds (Short)
+    { type: 1, components: [studyHoursInput, listeningHoursInput] }, // Row 3: Study Hours, Listening Hours (Short)
+    { type: 1, components: [sleepingTimeInput, regulativePrinciplesInput] }, // Row 4: Sleeping Time, Regulative Principles (Short)
+    { type: 1, components: [readingDetailsInput] }, // Row 5: Reading Details (Paragraph - takes full row)
+    // Additional Service will need to be added to an existing row or we need to remove one input.
+    // Let's add Additional Service to the last row with Reading Details.
+    // Note: While possible, mixing Short and Paragraph styles in one row might not render ideally in all clients.
+    // A better approach might be to make Additional Service a separate command or remove one less critical field.
+    // For now, let's try adding it to the last row to fit within 5.
+    // Re-evaluating the Discord docs, a Paragraph input *must* be in its own Action Row.
+    // This means we can only have 4 rows of Short inputs + 1 row of Paragraph input = 5 rows.
+    // We have 7 Short inputs and 2 Paragraph inputs. This exceeds the 5 row limit if each Paragraph is its own row.
+    // We need to either:
+    // 1. Remove one Paragraph input (e.g., Additional Service).
+    // 2. Combine one Paragraph input with a Short input (which Discord docs say is not ideal/supported for Paragraph).
+    // 3. Accept that we cannot fit all these fields into a single modal due to the 5-row limit.
 
-    // Let's try combining three short inputs in one row to save space.
-    // Row 1: Date
-    // Row 2: Waking Time, Japa Rounds, Study Hours
-    // Row 3: Listening Hours, Sleeping Time, Regulative Principles
-    // Row 4: Reading Details (Paragraph)
-    // Row 5: Additional Service (Paragraph)
-    // This is 5 rows. This should work.
+    // Let's remove Additional Service for now to ensure the modal works correctly within the 5-row limit.
+    // If Additional Service is critical, we might need a separate command for it.
 
-    { type: 1, components: [wakingTimeInput, japaRoundsInput, studyHoursInput] }, // Row 2
-    { type: 1, components: [listeningHoursInput, sleepingTimeInput, regulativePrinciplesInput] }, // Row 3
-    { type: 1, components: [readingDetailsInput] }, // Row 4
-    { type: 1, components: [additionalServiceInput] } // Row 5
+    // Corrected grouping for 5 rows:
+    { type: 1, components: [dateInput] }, // Row 1: Date (Short)
+    { type: 1, components: [wakingTimeInput, japaRoundsInput] }, // Row 2: Waking Time, Japa Rounds (Short)
+    { type: 1, components: [studyHoursInput, listeningHoursInput] }, // Row 3: Study Hours, Listening Hours (Short)
+    { type: 1, components: [sleepingTimeInput, regulativePrinciplesInput] }, // Row 4: Sleeping Time, Regulative Principles (Short)
+    { type: 1, components: [readingDetailsInput] } // Row 5: Reading Details (Paragraph)
+    // Removed Additional Service input from the modal to fit within the 5-row limit.
 );
 
 
