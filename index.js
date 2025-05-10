@@ -107,14 +107,7 @@ const Sadhana = sequelize.define('Sadhana', { // Model name is 'Sadhana'
         type: DataTypes.TEXT, // Use TEXT for potentially longer strings
         defaultValue: '',
     },
-    mangalaArati: {
-        type: DataTypes.BOOLEAN, // Use BOOLEAN for true/false
-        defaultValue: false,
-    },
-    morningProgram: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
+    // Removed mangalaArati and morningProgram fields from the model
     sleepingTime: {
         type: DataTypes.DATE, // Store as DATE if possible, or STRING if 'Not Slept' is needed
         allowNull: true, // Allow null for 'Not Slept'
@@ -230,13 +223,14 @@ function calculateScore(log) {
         score += 1;
     }
 
-    if (log.mangalaArati === true) {
-        score += 1;
-    }
-
-    if (log.morningProgram === true) {
-        score += 1;
-    }
+    // Removed scoring for mangalaArati and morningProgram
+    // if (log.mangalaArati === true) {
+    //     score += 1;
+    // }
+    //
+    // if (log.morningProgram === true) {
+    //     score += 1;
+    // }
 
     // Note: Accessing the boolean status from Sequelize would be log.wokeUpEarlyStatus
     if (log.wokeUpEarlyStatus === true) {
@@ -304,18 +298,20 @@ const commands = [
                 description: 'Number of japa rounds chanted',
                 required: true,
             },
-            {
-                name: 'mangala_aarti',
-                type: 5, // BOOLEAN
-                description: 'Did you attend Mangala Aarti (in person or online)?',
-                required: true,
-            },
-            {
-                name: 'morning_program',
-                type: 5, // BOOLEAN
-                description: 'Did you attend the morning program (in person or online)?',
-                required: true,
-            },
+            // Removed mangala_aarti option
+            // {
+            //     name: 'mangala_aarti',
+            //     type: 5, // BOOLEAN
+            //     description: 'Did you attend Mangala Aarti (in person or online)?',
+            //     required: true,
+            // },
+            // Removed morning_program option
+            // {
+            //     name: 'morning_program',
+            //     type: 5, // BOOLEAN
+            //     description: 'Did you attend the morning program (in person or online)?',
+            //     required: true,
+            // },
             {
                 name: 'study_hours',
                 type: 10, // NUMBER
@@ -545,8 +541,9 @@ client.on('interactionCreate', async interaction => {
         const year = interaction.options.getInteger('year');
         const wakingTimeInput = interaction.options.getString('waking_time');
         const japaRounds = interaction.options.getInteger('japa_rounds');
-        const mangalaArati = interaction.options.getBoolean('mangala_aarti');
-        const morningProgram = interaction.options.getBoolean('morning_program');
+        // Removed mangalaArati and morningProgram options retrieval
+        // const mangalaArati = interaction.options.getBoolean('mangala_aarti');
+        // const morningProgram = interaction.options.getBoolean('morning_program');
         const studyHours = interaction.options.getNumber('study_hours');
         const readingDetails = interaction.options.getString('reading_details');
         const listeningHours = interaction.options.getNumber('listening_hours');
@@ -707,8 +704,9 @@ client.on('interactionCreate', async interaction => {
                     japaRounds: japaRounds,
                     wakingTime: parsedWakingTime,
                     wokeUpEarlyStatus: wokeUpEarlyStatus,
-                    mangalaArati: mangalaArati,
-                    morningProgram: morningProgram,
+                    // Removed mangalaArati and morningProgram from defaults
+                    // mangalaArati: mangalaArati,
+                    // morningProgram: morningProgram,
                     studyHours: studyHours,
                     readingDetails: readingDetails,
                     listeningHours: listeningHours,
@@ -740,8 +738,9 @@ client.on('interactionCreate', async interaction => {
             sadhanaEntry.japaRounds = japaRounds;
             sadhanaEntry.wakingTime = parsedWakingTime;
             sadhanaEntry.wokeUpEarlyStatus = wokeUpEarlyStatus;
-            sadhanaEntry.mangalaArati = mangalaArati;
-            sadhanaEntry.morningProgram = morningProgram;
+            // Removed mangalaArati and morningProgram from update
+            // sadhanaEntry.mangalaArati = mangalaArati;
+            // sadhanaEntry.morningProgram = morningProgram;
             sadhanaEntry.studyHours = studyHours;
             sadhanaEntry.readingDetails = readingDetails;
             sadhanaEntry.listeningHours = listeningHours;
@@ -857,8 +856,9 @@ client.on('interactionCreate', async interaction => {
             .addFields(
                 { name: 'Waking Time', value: `${sadhanaEntry.wakingTime === null ? 'Not Slept' : (sadhanaEntry.wakingTime ? formatInTimeZone(sadhanaEntry.wakingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Woke Early < 5 AM IST: ${sadhanaEntry.wokeUpEarlyStatus ? 'Yes' : 'No'})` },
                 { name: 'Japa Rounds', value: sadhanaEntry.japaRounds.toString() },
-                { name: 'Mangala Aarti', value: sadhanaEntry.mangalaArati ? 'Yes' : 'No', inline: true },
-                { name: 'Morning Program', value: sadhanaEntry.morningProgram ? 'Yes' : 'No', inline: true },
+                // Removed Mangala Aarti and Morning Program fields from embed
+                // { name: 'Mangala Aarti', value: sadhanaEntry.mangalaArati ? 'Yes' : 'No', inline: true },
+                // { name: 'Morning Program', value: sadhanaEntry.morningProgram ? 'Yes' : 'No', inline: true },
                 { name: 'Study Hours', value: sadhanaEntry.studyHours.toString(), inline: true },
                 { name: 'Reading', value: sadhanaEntry.readingDetails || 'Not logged' },
                 { name: 'Listening Hours', value: sadhanaEntry.listeningHours.toString(), inline: true },
@@ -969,8 +969,9 @@ client.on('interactionCreate', async interaction => {
         let totalRounds = 0;
         let totalStudyHours = 0;
         let totalListeningHours = 0;
-        let mangalaAartiCount = 0; // Initialize mangalaAartiCount
-        let morningProgramCount = 0;
+        // Removed mangalaAartiCount and morningProgramCount initialization
+        // let mangalaAartiCount = 0;
+        // let morningProgramCount = 0;
         let totalScore = 0;
         const booksReadThisWeek = new Set();
         let earlyWakingCount = 0;
@@ -982,8 +983,9 @@ client.on('interactionCreate', async interaction => {
             totalRounds += log.japaRounds || 0;
             totalStudyHours += log.studyHours || 0;
             totalListeningHours += log.listeningHours || 0;
-            if (log.mangalaArati === true) mangalaAartiCount++;
-            if (log.morningProgram === true) morningProgramCount++;
+            // Removed incrementing counts for mangalaArati and morningProgram
+            // if (log.mangalaArati === true) mangalaAartiCount++;
+            // if (log.morningProgram === true) morningProgramCount++;
             totalScore += log.score || 0;
             if (log.readingDetails && log.readingDetails.trim() !== '') {
                 booksReadThisWeek.add(log.readingDetails);
@@ -1014,8 +1016,9 @@ client.on('interactionCreate', async interaction => {
                 { name: 'Total Rounds Chanted', value: `${totalRounds} (Avg per logged day: ${avgRounds})` },
                 { name: 'Total Study Hours', value: `${totalStudyHours.toFixed(2)} (Avg per logged day: ${avgStudyHours})`, inline: true },
                 { name: 'Total Listening Hours', value: `${totalListeningHours.toFixed(2)} (Avg per logged day: ${avgListeningHours})`, inline: true },
-                { name: 'Mangala Aarti Attended', value: `${mangalaAartiCount} time(s)`, inline: true },
-                { name: 'Morning Program Attended', value: `${morningProgramCount} time(s)`, inline: true },
+                // Removed Mangala Aarti and Morning Program fields
+                // { name: 'Mangala Aarti Attended', value: `${mangalaAartiCount} time(s)`, inline: true },
+                // { name: 'Morning Program Attended', value: `${morningProgramCount} time(s)`, inline: true },
                 { name: 'Woke up early (< 5 AM IST)', value: `${earlyWakingCount} time(s)`, inline: true },
                 { name: 'Slept early (< 11 PM IST Previous Night)', value: `${earlySleepingCount} time(s)`, inline: true },
                  { name: 'Avg. Regulative Principles Followed per Logged Day', value: `${avgPrinciplesPerDay} / 4` }, // Changed to out of 4
@@ -1038,7 +1041,6 @@ client.on('interactionCreate', async interaction => {
         console.log(`[${new Date().toISOString()}] Handling /monthlysummary command for user ${interaction.user.tag}`);
         console.log(`[${new Date().toISOString()}] Attempting to defer reply for interaction ${interaction.id}`);
         try {
-            // Removed ephemeral flag from deferReply
             await interaction.deferReply();
             console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
         } catch (deferError) {
@@ -1088,8 +1090,9 @@ client.on('interactionCreate', async interaction => {
         let totalRounds = 0;
         let totalStudyHours = 0;
         let totalListeningHours = 0;
-        let mangalaAartiCount = 0; // Initialize mangalaAartiCount
-        let morningProgramCount = 0;
+        // Removed mangalaAartiCount and morningProgramCount initialization
+        // let mangalaAartiCount = 0;
+        // let morningProgramCount = 0;
         let totalScore = 0;
         const booksReadThisMonth = new Set();
         let earlyWakingCount = 0;
@@ -1101,8 +1104,9 @@ client.on('interactionCreate', async interaction => {
             totalRounds += log.japaRounds || 0;
             totalStudyHours += log.studyHours || 0;
             totalListeningHours += log.listeningHours || 0;
-            if (log.mangalaArati === true) mangalaAartiCount++;
-            if (log.morningProgram === true) morningProgramCount++;
+            // Removed incrementing counts for mangalaArati and morningProgram
+            // if (log.mangalaArati === true) mangalaAartiCount++;
+            // if (log.morningProgram === true) morningProgramCount++;
             totalScore += log.score || 0;
             if (log.readingDetails && log.readingDetails.trim() !== '') {
                 booksReadThisMonth.add(log.readingDetails);
@@ -1133,8 +1137,9 @@ client.on('interactionCreate', async interaction => {
                  { name: 'Total Rounds Chanted', value: `${totalRounds} (Avg per logged day: ${avgRounds})` },
                  { name: 'Total Study Hours', value: `${totalStudyHours.toFixed(2)} (Avg per logged day: ${avgStudyHours})`, inline: true },
                  { name: 'Total Listening Hours', value: `${totalListeningHours.toFixed(2)} (Avg per logged day: ${avgListeningHours})`, inline: true },
-                 { name: 'Mangala Aarti Attended', value: `${mangalaAartiCount} time(s)`, inline: true },
-                 { name: 'Morning Program Attended', value: `${morningProgramCount} time(s)`, inline: true },
+                 // Removed Mangala Aarti and Morning Program fields
+                 // { name: 'Mangala Aarti Attended', value: `${mangalaAartiCount} time(s)`, inline: true },
+                 // { name: 'Morning Program Attended', value: `${morningProgramCount} time(s)`, inline: true },
                  { name: 'Woke up early (< 5 AM IST)', value: `${earlyWakingCount} time(s)`, inline: true },
                  { name: 'Slept early (< 11 PM IST Previous Night)', value: `${earlySleepingCount} time(s)`, inline: true },
                  { name: 'Avg. Regulative Principles Followed per Logged Day', value: `${avgPrinciplesPerDay} / 4` }, // Changed to out of 4
@@ -1633,7 +1638,7 @@ client.on('interactionCreate', async interaction => {
     // Handle the /help command
     else if (commandName === 'help') {
         console.log(`[${new Date().toISOString()}] Handling /help command for user ${interaction.user.tag}`);
-        const youtubeLink = 'https://youtu.be/ZoLCxwCNYZc'; // Replace with your actual YouTube link
+        const youtubeLink = 'Yet to be uploaded'; // Replace with your actual YouTube link
         // Create an embed for the help command
         const embed = new EmbedBuilder()
             .setColor('#FFFF00') // Yellow color
@@ -1728,8 +1733,9 @@ client.on('interactionCreate', async interaction => {
                         embed.addFields(
                             { name: 'Waking Time', value: `${userLog.wakingTime === null ? 'Not Slept' : (userLog.wakingTime ? formatInTimeZone(userLog.wakingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Woke Early < 5 AM IST: ${userLog.wokeUpEarlyStatus ? 'Yes' : 'No'})` },
                             { name: 'Japa Rounds', value: userLog.japaRounds.toString() },
-                            { name: 'Mangala Aarti', value: userLog.mangalaArati ? 'Yes' : 'No', inline: true },
-                            { name: 'Morning Program', value: userLog.morningProgram ? 'Yes' : 'No', inline: true },
+                            // Removed Mangala Aarti and Morning Program fields
+                            // { name: 'Mangala Aarti', value: userLog.mangalaArati ? 'Yes' : 'No', inline: true },
+                            // { name: 'Morning Program', value: userLog.morningProgram ? 'Yes' : 'No', inline: true },
                             { name: 'Study Hours', value: userLog.studyHours.toString(), inline: true },
                             { name: 'Reading', value: userLog.readingDetails || 'Not logged' },
                             { name: 'Listening Hours', value: userLog.listeningHours.toString(), inline: true },
