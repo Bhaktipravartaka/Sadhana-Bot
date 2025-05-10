@@ -477,45 +477,24 @@ const regulativePrinciplesInput = new TextInputBuilder()
     .setRequired(true)
     .setPlaceholder('e.g., Yes, Yes, Yes, Yes (Meat, Gambling, Sex, Intoxication)');
 
-const additionalServiceInput = new TextInputBuilder()
-    .setCustomId('additionalServiceInput')
-    .setLabel('Additional Service (Optional)')
-    .setStyle(TextInputStyle.Paragraph)
-    .setRequired(false) // This is optional
-    .setPlaceholder('e.g., Distributed flyers, Cleaned temple');
+// Additional Service input is removed from the modal to fit within the 5-row limit.
+// const additionalServiceInput = new TextInputBuilder()
+//     .setCustomId('additionalServiceInput')
+//     .setLabel('Additional Service (Optional)')
+//     .setStyle(TextInputStyle.Paragraph)
+//     .setRequired(false) // This is optional
+//     .setPlaceholder('e.g., Distributed flyers, Cleaned temple');
 
 
 // Add inputs to the modal, grouping them into a maximum of 5 Action Rows
 // Each ActionRow can hold up to 5 components, but TextInputStyle.Paragraph takes up the full row width.
+// We will use 5 rows to fit the most essential fields.
 logPracticeModal.addComponents(
     { type: 1, components: [dateInput] }, // Row 1: Date (Short)
-    { type: 1, components: [wakingTimeInput, japaRoundsInput] }, // Row 2: Waking Time, Japa Rounds (Short)
-    { type: 1, components: [studyHoursInput, listeningHoursInput] }, // Row 3: Study Hours, Listening Hours (Short)
-    { type: 1, components: [sleepingTimeInput, regulativePrinciplesInput] }, // Row 4: Sleeping Time, Regulative Principles (Short)
-    { type: 1, components: [readingDetailsInput] }, // Row 5: Reading Details (Paragraph - takes full row)
-    // Additional Service will need to be added to an existing row or we need to remove one input.
-    // Let's add Additional Service to the last row with Reading Details.
-    // Note: While possible, mixing Short and Paragraph styles in one row might not render ideally in all clients.
-    // A better approach might be to make Additional Service a separate command or remove one less critical field.
-    // For now, let's try adding it to the last row to fit within 5.
-    // Re-evaluating the Discord docs, a Paragraph input *must* be in its own Action Row.
-    // This means we can only have 4 rows of Short inputs + 1 row of Paragraph input = 5 rows.
-    // We have 7 Short inputs and 2 Paragraph inputs. This exceeds the 5 row limit if each Paragraph is its own row.
-    // We need to either:
-    // 1. Remove one Paragraph input (e.g., Additional Service).
-    // 2. Combine one Paragraph input with a Short input (which Discord docs say is not ideal/supported for Paragraph).
-    // 3. Accept that we cannot fit all these fields into a single modal due to the 5-row limit.
-
-    // Let's remove Additional Service for now to ensure the modal works correctly within the 5-row limit.
-    // If Additional Service is critical, we might need a separate command for it.
-
-    // Corrected grouping for 5 rows:
-    { type: 1, components: [dateInput] }, // Row 1: Date (Short)
-    { type: 1, components: [wakingTimeInput, japaRoundsInput] }, // Row 2: Waking Time, Japa Rounds (Short)
-    { type: 1, components: [studyHoursInput, listeningHoursInput] }, // Row 3: Study Hours, Listening Hours (Short)
-    { type: 1, components: [sleepingTimeInput, regulativePrinciplesInput] }, // Row 4: Sleeping Time, Regulative Principles (Short)
-    { type: 1, components: [readingDetailsInput] } // Row 5: Reading Details (Paragraph)
-    // Removed Additional Service input from the modal to fit within the 5-row limit.
+    { type: 1, components: [japaRoundsInput, studyHoursInput] }, // Row 2: Japa Rounds, Study Hours (Short)
+    { type: 1, components: [listeningHoursInput, regulativePrinciplesInput] }, // Row 3: Listening Hours, Regulative Principles (Short)
+    { type: 1, components: [readingDetailsInput] }, // Row 4: Reading Details (Paragraph)
+    { type: 1, components: [wakingTimeInput, sleepingTimeInput] } // Row 5: Waking Time, Sleeping Time (Short)
 );
 
 
@@ -1540,7 +1519,8 @@ client.on('interactionCreate', async interaction => {
             const listeningHoursInput = interaction.fields.getTextInputValue('listeningHoursInput');
             const sleepingTimeInput = interaction.fields.getTextInputValue('sleepingTimeInput');
             const regulativePrinciplesInput = interaction.fields.getTextInputValue('regulativePrinciplesInput');
-            const additionalService = interaction.fields.getTextInputValue('additionalServiceInput');
+            // Additional Service input is removed from the modal, so we don't get its value here.
+            // const additionalService = interaction.fields.getTextInputValue('additionalServiceInput');
 
             const userId = interaction.user.id;
             const guildId = interaction.guild?.id;
@@ -1716,7 +1696,8 @@ client.on('interactionCreate', async interaction => {
                         noGambling: noGambling,
                         noIllicitSex: noIllicitSex,
                         noIntoxication: noIntoxication,
-                        additionalService: additionalService,
+                        // additionalService is not in the modal, so it won't be in defaults for new entries.
+                        // If updating, it will retain its previous value or be null if it didn't exist.
                         score: 0, // Calculate score after updating
                     }
                 });
@@ -1734,7 +1715,7 @@ client.on('interactionCreate', async interaction => {
 
             const isUpdatingExistingLog = !created; // If not created, it was found
 
-            // If updating, update the found entry
+            // If updating, update the found entry with values from the modal
             if (isUpdatingExistingLog) {
                 sadhanaEntry.japaRounds = japaRounds;
                 sadhanaEntry.wakingTime = parsedWakingTime;
@@ -1748,7 +1729,8 @@ client.on('interactionCreate', async interaction => {
                 sadhanaEntry.noGambling = noGambling;
                 sadhanaEntry.noIllicitSex = noIllicitSex;
                 sadhanaEntry.noIntoxication = noIntoxication;
-                sadhanaEntry.additionalService = additionalService;
+                // additionalService is not in the modal, so we don't update it here.
+                // sadhanaEntry.additionalService = additionalService; // REMOVED
             }
 
             // Calculate and store the score
@@ -1865,9 +1847,10 @@ client.on('interactionCreate', async interaction => {
                 )
                  .setFooter({ text: `Score for this log: ${sadhanaEntry.score} | Current Chanting Streak: ${userStreak.streakCount} day(s) 🙏` });
 
-             if (sadhanaEntry.additionalService) {
-                 embed.addFields({ name: 'Additional Service', value: sadhanaEntry.additionalService });
-             }
+             // Additional Service is not in the modal, so we don't include it in the confirmation embed.
+             // if (sadhanaEntry.additionalService) {
+             //     embed.addFields({ name: 'Additional Service', value: sadhanaEntry.additionalService });
+             // }
 
              // --- Add Encouragement Messages to description or a field ---
              let encouragementMessages = [];
