@@ -469,9 +469,10 @@ const sleepingTimeInput = new TextInputBuilder()
     .setRequired(true)
     .setPlaceholder('e.g., 10:30 PM or Not Slept');
 
+// Shortened the label to fit within the 45-character limit
 const regulativePrinciplesInput = new TextInputBuilder()
     .setCustomId('regulativePrinciplesInput')
-    .setLabel('Regulative Principles (Yes/No for each, comma separated)')
+    .setLabel('Regulative Principles (Yes/No, comma sep)') // Shortened label
     .setStyle(TextInputStyle.Short)
     .setRequired(true)
     .setPlaceholder('e.g., Yes, Yes, Yes, Yes (Meat, Gambling, Sex, Intoxication)');
