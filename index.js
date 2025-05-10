@@ -306,7 +306,7 @@ const commands = [
                 required: true,
                 choices: [
                     { name: 'Weekly', value: 'weekly' },
-                    { name: 'Monthly', value: 'monthly' },
+                    { name: 'Monthly', value: 'monthly'},
                 ],
             },
         ],
@@ -427,12 +427,13 @@ const dateInput = new TextInputBuilder()
     .setRequired(true)
     .setPlaceholder('e.g., 07/05/2025');
 
-const wakingTimeInput = new TextInputBuilder()
-    .setCustomId('wakingTimeInput')
-    .setLabel('Waking Time (h:mm AM/PM or "Not Slept")')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true)
-    .setPlaceholder('e.g., 4:30 AM or Not Slept');
+// Waking Time and Sleeping Time are removed from this modal to fit within the 5-row limit.
+// const wakingTimeInput = new TextInputBuilder()
+//     .setCustomId('wakingTimeInput')
+//     .setLabel('Waking Time (h:mm AM/PM or "Not Slept")')
+//     .setStyle(TextInputStyle.Short)
+//     .setRequired(true)
+//     .setPlaceholder('e.g., 4:30 AM or Not Slept');
 
 const japaRoundsInput = new TextInputBuilder()
     .setCustomId('japaRoundsInput')
@@ -441,12 +442,13 @@ const japaRoundsInput = new TextInputBuilder()
     .setRequired(true)
     .setPlaceholder('e.g., 16');
 
-const studyHoursInput = new TextInputBuilder()
-    .setCustomId('studyHoursInput')
-    .setLabel('Study Hours')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true)
-    .setPlaceholder('e.g., 1.5');
+// Study Hours is removed from this modal to fit within the 5-row limit.
+// const studyHoursInput = new TextInputBuilder()
+//     .setCustomId('studyHoursInput')
+//     .setLabel('Study Hours')
+//     .setStyle(TextInputStyle.Short)
+//     .setRequired(true)
+//     .setPlaceholder('e.g., 1.5');
 
 const readingDetailsInput = new TextInputBuilder()
     .setCustomId('readingDetailsInput')
@@ -462,12 +464,13 @@ const listeningHoursInput = new TextInputBuilder()
     .setRequired(true)
     .setPlaceholder('e.g., 0.75');
 
-const sleepingTimeInput = new TextInputBuilder()
-    .setCustomId('sleepingTimeInput')
-    .setLabel('Sleeping Time (h:mm AM/PM or "Not Slept")')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true)
-    .setPlaceholder('e.g., 10:30 PM or Not Slept');
+// Sleeping Time is removed from this modal to fit within the 5-row limit.
+// const sleepingTimeInput = new TextInputBuilder()
+//     .setCustomId('sleepingTimeInput')
+//     .setLabel('Sleeping Time (h:mm AM/PM or "Not Slept")')
+//     .setStyle(TextInputStyle.Short)
+//     .setRequired(true)
+//     .setPlaceholder('e.g., 10:30 PM or Not Slept');
 
 // Shortened the label to fit within the 45-character limit
 const regulativePrinciplesInput = new TextInputBuilder()
@@ -486,15 +489,13 @@ const regulativePrinciplesInput = new TextInputBuilder()
 //     .setPlaceholder('e.g., Distributed flyers, Cleaned temple');
 
 
-// Add inputs to the modal, grouping them into a maximum of 5 Action Rows
-// Each ActionRow can hold up to 5 components, but TextInputStyle.Paragraph takes up the full row width.
-// We will use 5 rows to fit the most essential fields.
+// Add inputs to the modal, grouping them into 5 Action Rows, one input per row for short inputs.
 logPracticeModal.addComponents(
     { type: 1, components: [dateInput] }, // Row 1: Date (Short)
-    { type: 1, components: [japaRoundsInput, studyHoursInput] }, // Row 2: Japa Rounds, Study Hours (Short)
-    { type: 1, components: [listeningHoursInput, regulativePrinciplesInput] }, // Row 3: Listening Hours, Regulative Principles (Short)
-    { type: 1, components: [readingDetailsInput] }, // Row 4: Reading Details (Paragraph)
-    { type: 1, components: [wakingTimeInput, sleepingTimeInput] } // Row 5: Waking Time, Sleeping Time (Short)
+    { type: 1, components: [japaRoundsInput] }, // Row 2: Japa Rounds (Short)
+    { type: 1, components: [listeningHoursInput] }, // Row 3: Listening Hours (Short)
+    { type: 1, components: [regulativePrinciplesInput] }, // Row 4: Regulative Principles (Short)
+    { type: 1, components: [readingDetailsInput] } // Row 5: Reading Details (Paragraph)
 );
 
 
@@ -1512,12 +1513,15 @@ client.on('interactionCreate', async interaction => {
 
             // Get the data from the modal inputs
             const dateString = interaction.fields.getTextInputValue('dateInput');
-            const wakingTimeInput = interaction.fields.getTextInputValue('wakingTimeInput');
+            // Waking Time is removed from the modal
+            // const wakingTimeInput = interaction.fields.getTextInputValue('wakingTimeInput');
             const japaRoundsInput = interaction.fields.getTextInputValue('japaRoundsInput');
-            const studyHoursInput = interaction.fields.getTextInputValue('studyHoursInput');
+            // Study Hours is removed from the modal
+            // const studyHoursInput = interaction.fields.getTextInputValue('studyHoursInput');
             const readingDetails = interaction.fields.getTextInputValue('readingDetailsInput');
             const listeningHoursInput = interaction.fields.getTextInputValue('listeningHoursInput');
-            const sleepingTimeInput = interaction.fields.getTextInputValue('sleepingTimeInput');
+            // Sleeping Time is removed from the modal
+            // const sleepingTimeInput = interaction.fields.getTextInputValue('sleepingTimeInput');
             const regulativePrinciplesInput = interaction.fields.getTextInputValue('regulativePrinciplesInput');
             // Additional Service input is removed from the modal, so we don't get its value here.
             // const additionalService = interaction.fields.getTextInputValue('additionalServiceInput');
@@ -1560,21 +1564,22 @@ client.on('interactionCreate', async interaction => {
                  return;
             }
 
-            let studyHours;
-            try {
-                 studyHours = parseFloat(studyHoursInput);
-                 if (isNaN(studyHours) || studyHours < 0) {
-                     throw new Error(`Invalid study hours value: "${studyHoursInput}". Please enter a non-negative number.`);
-                 }
-            } catch (error) {
-                 console.error(`Error parsing study hours "${studyHoursInput}" from modal:`, error);
-                 const embed = new EmbedBuilder()
-                     .setColor('#FF0000')
-                     .setTitle('Logging Failed')
-                     .setDescription(`Invalid study hours: ${error.message}`);
-                 await interaction.editReply({ embeds: [embed] });
-                 return;
-            }
+            // Study Hours is removed from the modal, so no parsing here.
+            // let studyHours;
+            // try {
+            //      studyHours = parseFloat(studyHoursInput);
+            //      if (isNaN(studyHours) || studyHours < 0) {
+            //          throw new Error(`Invalid study hours value: "${studyHoursInput}". Please enter a non-negative number.`);
+            //      }
+            // } catch (error) {
+            //      console.error(`Error parsing study hours "${studyHoursInput}" from modal:`, error);
+            //      const embed = new EmbedBuilder()
+            //          .setColor('#FF0000')
+            //          .setTitle('Logging Failed')
+            //          .setDescription(`Invalid study hours: ${error.message}`);
+            //      await interaction.editReply({ embeds: [embed] });
+            //      return;
+            // }
 
             let listeningHours;
             try {
@@ -1592,69 +1597,71 @@ client.on('interactionCreate', async interaction => {
                  return;
             }
 
-            let parsedWakingTime = null;
-            let wokeUpEarlyStatus = false;
-            const dateKeyForTimeParsing = format(loggedDate, 'yyyy-MM-dd');
+            // Waking Time and Sleeping Time are removed from the modal, so no parsing here.
+            // let parsedWakingTime = null;
+            // let wokeUpEarlyStatus = false;
+            // const dateKeyForTimeParsing = format(loggedDate, 'yyyy-MM-dd');
+            //
+            // if (wakingTimeInput && wakingTimeInput.toLowerCase() === 'not slept') {
+            //     parsedWakingTime = null;
+            //     wokeUpEarlyStatus = false;
+            // } else {
+            //     try {
+            //         parsedWakingTime = parseTimeInIST(dateKeyForTimeParsing, wakingTimeInput);
+            //         if (!parsedWakingTime) {
+            //              throw new Error(`Invalid format. Please use HH:MM AM/PM (e.g., 4:30 AM) or type "Not Slept".`);
+            //         }
+            //         let fiveAmIST = parseTimeInIST(dateKeyForTimeParsing, '5:00 AM');
+            //         if (fiveAmIST) {
+            //             wokeUpEarlyStatus = parsedWakingTime < fiveAmIST;
+            //         } else {
+            //              console.error("Could not parse 5:00 AM IST for comparison.");
+            //              // Continue without early status if comparison fails
+            //         }
+            //
+            //     } catch (error) {
+            //          console.error(`Error parsing waking time "${wakingTimeInput}" from modal:`, error);
+            //          const embed = new EmbedBuilder()
+            //              .setColor('#FF0000')
+            //              .setTitle('Logging Failed')
+            //              .setDescription(`Invalid waking time: ${error.message}`);
+            //          await interaction.editReply({ embeds: [embed] });
+            //          return;
+            //     }
+            // }
+            //
+            // let parsedSleepingTime = null;
+            // let sleptEarlyStatus = false;
+            // const previousDayDate = addDays(loggedDate, -1);
+            // const previousDateKey = format(previousDayDate, 'yyyy-MM-dd');
+            //
+            // if (sleepingTimeInput && sleepingTimeInput.toLowerCase() === 'not slept') {
+            //     parsedSleepingTime = null;
+            //     sleptEarlyStatus = false;
+            // } else {
+            //     try {
+            //         parsedSleepingTime = parseTimeInIST(previousDateKey, sleepingTimeInput);
+            //          if (!parsedSleepingTime) {
+            //              throw new Error(`Invalid format. Please use HH:MM AM/PM (e.g., 10:30 PM) or type "Not Slept".`);
+            //         }
+            //          let elevenPmISTPreviousDay = parseTimeInIST(previousDateKey, '11:00 PM');
+            //          if (elevenPmISTPreviousDay) {
+            //              sleptEarlyStatus = parsedSleepingTime < elevenPmISTPreviousDay;
+            //          } else {
+            //              console.error("Could not parse 11:00 PM IST (previous day) for comparison.");
+            //              // Continue without early status if comparison fails
+            //          }
+            //     } catch (error) {
+            //          console.error(`Error parsing sleeping time "${sleepingTimeInput}" from modal:`, error);
+            //          const embed = new EmbedBuilder()
+            //              .setColor('#FF0000')
+            //              .setTitle('Logging Failed')
+            //              .setDescription(`Invalid sleeping time: ${error.message}`);
+            //          await interaction.editReply({ embeds: [embed] });
+            //          return;
+            //     }
+            // }
 
-            if (wakingTimeInput && wakingTimeInput.toLowerCase() === 'not slept') {
-                parsedWakingTime = null;
-                wokeUpEarlyStatus = false;
-            } else {
-                try {
-                    parsedWakingTime = parseTimeInIST(dateKeyForTimeParsing, wakingTimeInput);
-                    if (!parsedWakingTime) {
-                         throw new Error(`Invalid format. Please use HH:MM AM/PM (e.g., 4:30 AM) or type "Not Slept".`);
-                    }
-                    let fiveAmIST = parseTimeInIST(dateKeyForTimeParsing, '5:00 AM');
-                    if (fiveAmIST) {
-                        wokeUpEarlyStatus = parsedWakingTime < fiveAmIST;
-                    } else {
-                         console.error("Could not parse 5:00 AM IST for comparison.");
-                         // Continue without early status if comparison fails
-                    }
-
-                } catch (error) {
-                     console.error(`Error parsing waking time "${wakingTimeInput}" from modal:`, error);
-                     const embed = new EmbedBuilder()
-                         .setColor('#FF0000')
-                         .setTitle('Logging Failed')
-                         .setDescription(`Invalid waking time: ${error.message}`);
-                     await interaction.editReply({ embeds: [embed] });
-                     return;
-                }
-            }
-
-            let parsedSleepingTime = null;
-            let sleptEarlyStatus = false;
-            const previousDayDate = addDays(loggedDate, -1);
-            const previousDateKey = format(previousDayDate, 'yyyy-MM-dd');
-
-            if (sleepingTimeInput && sleepingTimeInput.toLowerCase() === 'not slept') {
-                parsedSleepingTime = null;
-                sleptEarlyStatus = false;
-            } else {
-                try {
-                    parsedSleepingTime = parseTimeInIST(previousDateKey, sleepingTimeInput);
-                     if (!parsedSleepingTime) {
-                         throw new Error(`Invalid format. Please use HH:MM AM/PM (e.g., 10:30 PM) or type "Not Slept".`);
-                    }
-                     let elevenPmISTPreviousDay = parseTimeInIST(previousDateKey, '11:00 PM');
-                     if (elevenPmISTPreviousDay) {
-                         sleptEarlyStatus = parsedSleepingTime < elevenPmISTPreviousDay;
-                     } else {
-                         console.error("Could not parse 11:00 PM IST (previous day) for comparison.");
-                         // Continue without early status if comparison fails
-                     }
-                } catch (error) {
-                     console.error(`Error parsing sleeping time "${sleepingTimeInput}" from modal:`, error);
-                     const embed = new EmbedBuilder()
-                         .setColor('#FF0000')
-                         .setTitle('Logging Failed')
-                         .setDescription(`Invalid sleeping time: ${error.message}`);
-                     await interaction.editReply({ embeds: [embed] });
-                     return;
-                }
-            }
 
              let noMeatEating = false, noGambling = false, noIllicitSex = false, noIntoxication = false;
              const principles = regulativePrinciplesInput.toLowerCase().split(',').map(p => p.trim());
@@ -1685,19 +1692,23 @@ client.on('interactionCreate', async interaction => {
                         guildId: guildId,
                         date: loggedDate,
                         japaRounds: japaRounds,
-                        wakingTime: parsedWakingTime,
-                        wokeUpEarlyStatus: wokeUpEarlyStatus,
-                        studyHours: studyHours,
+                        // Waking Time and Sleeping Time are not in the modal, set to null or default
+                        wakingTime: null, // Set to null
+                        wokeUpEarlyStatus: false, // Set to false
+                        // Study Hours is not in the modal, set to 0 or default
+                        studyHours: 0, // Set to 0
                         readingDetails: readingDetails,
                         listeningHours: listeningHours,
-                        sleepingTime: parsedSleepingTime,
-                        sleptEarlyStatus: sleptEarlyStatus,
+                        // Sleeping Time is not in the modal, set to null or default
+                        sleepingTime: null, // Set to null
+                        sleptEarlyStatus: false, // Set to false
                         noMeatEating: noMeatEating,
                         noGambling: noGambling,
                         noIllicitSex: noIllicitSex,
                         noIntoxication: noIntoxication,
                         // additionalService is not in the modal, so it won't be in defaults for new entries.
                         // If updating, it will retain its previous value or be null if it didn't exist.
+                        additionalService: '', // Set to empty string
                         score: 0, // Calculate score after updating
                     }
                 });
@@ -1718,13 +1729,16 @@ client.on('interactionCreate', async interaction => {
             // If updating, update the found entry with values from the modal
             if (isUpdatingExistingLog) {
                 sadhanaEntry.japaRounds = japaRounds;
-                sadhanaEntry.wakingTime = parsedWakingTime;
-                sadhanaEntry.wokeUpEarlyStatus = wokeUpEarlyStatus;
-                sadhanaEntry.studyHours = studyHours;
+                // Waking Time and Sleeping Time are not in the modal, do not update from modal input
+                // sadhanaEntry.wakingTime = parsedWakingTime; // REMOVED
+                // sadhanaEntry.wokeUpEarlyStatus = wokeUpEarlyStatus; // REMOVED
+                // Study Hours is not in the modal, do not update from modal input
+                // sadhanaEntry.studyHours = studyHours; // REMOVED
                 sadhanaEntry.readingDetails = readingDetails;
                 sadhanaEntry.listeningHours = listeningHours;
-                sadhanaEntry.sleepingTime = parsedSleepingTime;
-                sadhanaEntry.sleptEarlyStatus = sleptEarlyStatus;
+                // Sleeping Time is not in the modal, do not update from modal input
+                // sadhanaEntry.sleepingTime = parsedSleepingTime; // REMOVED
+                // sadhanaEntry.sleptEarlyStatus = sleptEarlyStatus; // REMOVED
                 sadhanaEntry.noMeatEating = noMeatEating;
                 sadhanaEntry.noGambling = noGambling;
                 sadhanaEntry.noIllicitSex = noIllicitSex;
@@ -1837,20 +1851,23 @@ client.on('interactionCreate', async interaction => {
                 .setColor('#0099FF') // Blue color
                 .setTitle(`${isUpdatingExistingLog ? 'Updated' : 'New'} Daily Practice Log for ${interaction.user.username} on ${formattedLoggedDate}`)
                 .addFields(
+                    // Waking Time and Sleeping Time are not in the modal, display from database if available
                     { name: 'Waking Time', value: `${sadhanaEntry.wakingTime === null ? 'Not Slept' : (sadhanaEntry.wakingTime ? formatInTimeZone(sadhanaEntry.wakingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Woke Early < 5 AM IST: ${sadhanaEntry.wokeUpEarlyStatus ? 'Yes' : 'No'})` },
                     { name: 'Japa Rounds', value: sadhanaEntry.japaRounds.toString() },
+                    // Study Hours is not in the modal, display from database if available
                     { name: 'Study Hours', value: sadhanaEntry.studyHours.toString(), inline: true },
                     { name: 'Reading', value: sadhanaEntry.readingDetails || 'Not logged' },
                     { name: 'Listening Hours', value: sadhanaEntry.listeningHours.toString(), inline: true },
+                    // Sleeping Time is not in the modal, display from database if available
                     { name: 'Sleeping Time', value: `${sadhanaEntry.sleepingTime === null ? 'Not Slept' : (sadhanaEntry.sleepingTime ? formatInTimeZone(sadhanaEntry.sleepingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Slept Early < 11 PM IST Previous Night: ${sadhanaEntry.sleptEarlyStatus ? 'Yes' : 'No'})` },
                     { name: 'Regulative Principles Followed', value: `Meat: ${sadhanaEntry.noMeatEating ? 'Yes' : 'No'}, Gambling: ${sadhanaEntry.noGambling ? 'Yes' : 'No'}, Illicit Sex: ${sadhanaEntry.noIllicitSex ? 'Yes' : 'No'}, Intoxication: ${sadhanaEntry.noIntoxication ? 'Yes' : 'No'}` }
                 )
                  .setFooter({ text: `Score for this log: ${sadhanaEntry.score} | Current Chanting Streak: ${userStreak.streakCount} day(s) 🙏` });
 
-             // Additional Service is not in the modal, so we don't include it in the confirmation embed.
-             // if (sadhanaEntry.additionalService) {
-             //     embed.addFields({ name: 'Additional Service', value: sadhanaEntry.additionalService });
-             // }
+             // Additional Service is not in the modal, display from database if available
+             if (sadhanaEntry.additionalService) {
+                 embed.addFields({ name: 'Additional Service', value: sadhanaEntry.additionalService });
+             }
 
              // --- Add Encouragement Messages to description or a field ---
              let encouragementMessages = [];
