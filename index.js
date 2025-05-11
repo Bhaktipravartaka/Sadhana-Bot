@@ -1912,7 +1912,7 @@ client.on('interactionCreate', async interaction => {
             // }
             // Added encouragement for study hours
             if ((sadhanaEntry.studyHours || 0) < 0.1) {
-                encouragementMessages.push("Studying spiritual literature is vital. Dedicate some time to study today!");
+                encouragementMessages.push("Dedicate some time to study today!");
             }
 
 
