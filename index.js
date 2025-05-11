@@ -442,13 +442,13 @@ const japaRoundsInput = new TextInputBuilder()
     .setRequired(true)
     .setPlaceholder('e.g., 16');
 
-// Study Hours is removed from this modal to fit within the 5-row limit.
-// const studyHoursInput = new TextInputBuilder()
-//     .setCustomId('studyHoursInput')
-//     .setLabel('Study Hours')
-//     .setStyle(TextInputStyle.Short)
-//     .setRequired(true)
-//     .setPlaceholder('e.g., 1.5');
+// Study Hours is now included in the modal
+const studyHoursInput = new TextInputBuilder()
+    .setCustomId('studyHoursInput')
+    .setLabel('Study Hours')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setPlaceholder('e.g., 1.5');
 
 const readingDetailsInput = new TextInputBuilder()
     .setCustomId('readingDetailsInput')
@@ -472,13 +472,13 @@ const listeningHoursInput = new TextInputBuilder()
 //     .setRequired(true)
 //     .setPlaceholder('e.g., 10:30 PM or Not Slept');
 
-// Shortened the label to fit within the 45-character limit
-const regulativePrinciplesInput = new TextInputBuilder()
-    .setCustomId('regulativePrinciplesInput')
-    .setLabel('Regulative Principles (Yes/No, comma sep)') // Shortened label
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true)
-    .setPlaceholder('e.g., Yes, Yes, Yes, Yes (Meat, Gambling, Sex, Intoxication)');
+// Regulative Principles input is removed from this modal.
+// const regulativePrinciplesInput = new TextInputBuilder()
+//     .setCustomId('regulativePrinciplesInput')
+//     .setLabel('Regulative Principles (Yes/No, comma sep)') // Shortened label
+//     .setStyle(TextInputStyle.Short)
+//     .setRequired(true)
+//     .setPlaceholder('e.g., Yes, Yes, Yes, Yes (Meat, Gambling, Sex, Intoxication)');
 
 // Additional Service input is removed from the modal to fit within the 5-row limit.
 // const additionalServiceInput = new TextInputBuilder()
@@ -493,8 +493,8 @@ const regulativePrinciplesInput = new TextInputBuilder()
 logPracticeModal.addComponents(
     { type: 1, components: [dateInput] }, // Row 1: Date (Short)
     { type: 1, components: [japaRoundsInput] }, // Row 2: Japa Rounds (Short)
-    { type: 1, components: [listeningHoursInput] }, // Row 3: Listening Hours (Short)
-    { type: 1, components: [regulativePrinciplesInput] }, // Row 4: Regulative Principles (Short)
+    { type: 1, components: [studyHoursInput] }, // Row 3: Study Hours (Short)
+    { type: 1, components: [listeningHoursInput] }, // Row 4: Listening Hours (Short)
     { type: 1, components: [readingDetailsInput] } // Row 5: Reading Details (Paragraph)
 );
 
@@ -1516,13 +1516,14 @@ client.on('interactionCreate', async interaction => {
             // Waking Time is removed from the modal
             // const wakingTimeInput = interaction.fields.getTextInputValue('wakingTimeInput');
             const japaRoundsInput = interaction.fields.getTextInputValue('japaRoundsInput');
-            // Study Hours is removed from the modal
-            // const studyHoursInput = interaction.fields.getTextInputValue('studyHoursInput');
+            // Study Hours is now included in the modal
+            const studyHoursInput = interaction.fields.getTextInputValue('studyHoursInput');
             const readingDetails = interaction.fields.getTextInputValue('readingDetailsInput');
             const listeningHoursInput = interaction.fields.getTextInputValue('listeningHoursInput');
             // Sleeping Time is removed from the modal
             // const sleepingTimeInput = interaction.fields.getTextInputValue('sleepingTimeInput');
-            const regulativePrinciplesInput = interaction.fields.getTextInputValue('regulativePrinciplesInput');
+            // Regulative Principles input is removed from the modal
+            // const regulativePrinciplesInput = interaction.fields.getTextInputValue('regulativePrinciplesInput');
             // Additional Service input is removed from the modal, so we don't get its value here.
             // const additionalService = interaction.fields.getTextInputValue('additionalServiceInput');
 
@@ -1564,22 +1565,22 @@ client.on('interactionCreate', async interaction => {
                  return;
             }
 
-            // Study Hours is removed from the modal, so no parsing here.
-            // let studyHours;
-            // try {
-            //      studyHours = parseFloat(studyHoursInput);
-            //      if (isNaN(studyHours) || studyHours < 0) {
-            //          throw new Error(`Invalid study hours value: "${studyHoursInput}". Please enter a non-negative number.`);
-            //      }
-            // } catch (error) {
-            //      console.error(`Error parsing study hours "${studyHoursInput}" from modal:`, error);
-            //      const embed = new EmbedBuilder()
-            //          .setColor('#FF0000')
-            //          .setTitle('Logging Failed')
-            //          .setDescription(`Invalid study hours: ${error.message}`);
-            //      await interaction.editReply({ embeds: [embed] });
-            //      return;
-            // }
+            // Study Hours is now included in the modal, parse it here.
+            let studyHours;
+            try {
+                 studyHours = parseFloat(studyHoursInput);
+                 if (isNaN(studyHours) || studyHours < 0) {
+                     throw new Error(`Invalid study hours value: "${studyHoursInput}". Please enter a non-negative number.`);
+                 }
+            } catch (error) {
+                 console.error(`Error parsing study hours "${studyHoursInput}" from modal:`, error);
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000')
+                     .setTitle('Logging Failed')
+                     .setDescription(`Invalid study hours: ${error.message}`);
+                 await interaction.editReply({ embeds: [embed] });
+                 return;
+            }
 
             let listeningHours;
             try {
@@ -1663,21 +1664,22 @@ client.on('interactionCreate', async interaction => {
             // }
 
 
-             let noMeatEating = false, noGambling = false, noIllicitSex = false, noIntoxication = false;
-             const principles = regulativePrinciplesInput.toLowerCase().split(',').map(p => p.trim());
-             if (principles.length === 4) {
-                 noMeatEating = principles[0] === 'yes';
-                 noGambling = principles[1] === 'yes';
-                 noIllicitSex = principles[2] === 'yes';
-                 noIntoxication = principles[3] === 'yes';
-             } else {
-                 const embed = new EmbedBuilder()
-                     .setColor('#FF0000')
-                     .setTitle('Logging Failed')
-                     .setDescription(`Invalid format for Regulative Principles. Please provide Yes/No for each, separated by commas (e.g., Yes, Yes, Yes, Yes).`);
-                 await interaction.editReply({ embeds: [embed] });
-                 return;
-             }
+             // Regulative Principles input is removed from the modal, so no parsing here.
+             // let noMeatEating = false, noGambling = false, noIllicitSex = false, noIntoxication = false;
+             // const principles = regulativePrinciplesInput.toLowerCase().split(',').map(p => p.trim());
+             // if (principles.length === 4) {
+             //     noMeatEating = principles[0] === 'yes';
+             //     noGambling = principles[1] === 'yes';
+             //     noIllicitSex = principles[2] === 'yes';
+             //     noIntoxication = principles[3] === 'yes';
+             // } else {
+             //     const embed = new EmbedBuilder()
+             //         .setColor('#FF0000')
+             //         .setTitle('Logging Failed')
+             //         .setDescription(`Invalid format for Regulative Principles. Please provide Yes/No for each, separated by commas (e.g., Yes, Yes, Yes, Yes).`);
+             //     await interaction.editReply({ embeds: [embed] });
+             //     return;
+             // }
 
 
             // --- Database Interaction Logic (Rewritten for Sequelize) ---
@@ -1695,17 +1697,18 @@ client.on('interactionCreate', async interaction => {
                         // Waking Time and Sleeping Time are not in the modal, set to null or default
                         wakingTime: null, // Set to null
                         wokeUpEarlyStatus: false, // Set to false
-                        // Study Hours is not in the modal, set to 0 or default
-                        studyHours: 0, // Set to 0
+                        // Study Hours is now in the modal
+                        studyHours: studyHours,
                         readingDetails: readingDetails,
                         listeningHours: listeningHours,
                         // Sleeping Time is not in the modal, set to null or default
                         sleepingTime: null, // Set to null
                         sleptEarlyStatus: false, // Set to false
-                        noMeatEating: noMeatEating,
-                        noGambling: noGambling,
-                        noIllicitSex: noIllicitSex,
-                        noIntoxication: noIntoxication,
+                        // Regulative Principles are not in the modal, set to false
+                        noMeatEating: false, // Set to false
+                        noGambling: false, // Set to false
+                        noIllicitSex: false, // Set to false
+                        noIntoxication: false, // Set to false
                         // additionalService is not in the modal, so it won't be in defaults for new entries.
                         // If updating, it will retain its previous value or be null if it didn't exist.
                         additionalService: '', // Set to empty string
@@ -1732,17 +1735,18 @@ client.on('interactionCreate', async interaction => {
                 // Waking Time and Sleeping Time are not in the modal, do not update from modal input
                 // sadhanaEntry.wakingTime = parsedWakingTime; // REMOVED
                 // sadhanaEntry.wokeUpEarlyStatus = wokeUpEarlyStatus; // REMOVED
-                // Study Hours is not in the modal, do not update from modal input
-                // sadhanaEntry.studyHours = studyHours; // REMOVED
+                // Study Hours is now in the modal, update it.
+                sadhanaEntry.studyHours = studyHours;
                 sadhanaEntry.readingDetails = readingDetails;
                 sadhanaEntry.listeningHours = listeningHours;
                 // Sleeping Time is not in the modal, do not update from modal input
                 // sadhanaEntry.sleepingTime = parsedSleepingTime; // REMOVED
                 // sadhanaEntry.sleptEarlyStatus = sleptEarlyStatus; // REMOVED
-                sadhanaEntry.noMeatEating = noMeatEating;
-                sadhanaEntry.noGambling = noGambling;
-                sadhanaEntry.noIllicitSex = noIllicitSex;
-                sadhanaEntry.noIntoxication = noIntoxication;
+                // Regulative Principles are not in the modal, do not update from modal input
+                // sadhanaEntry.noMeatEating = noMeatEating; // REMOVED
+                // sadhanaEntry.noGambling = noGambling; // REMOVED
+                // sadhanaEntry.noIllicitSex = noIllicitSex; // REMOVED
+                // sadhanaEntry.noIntoxication = noIntoxication; // REMOVED
                 // additionalService is not in the modal, so we don't update it here.
                 // sadhanaEntry.additionalService = additionalService; // REMOVED
             }
@@ -1854,12 +1858,13 @@ client.on('interactionCreate', async interaction => {
                     // Waking Time and Sleeping Time are not in the modal, display from database if available
                     { name: 'Waking Time', value: `${sadhanaEntry.wakingTime === null ? 'Not Slept' : (sadhanaEntry.wakingTime ? formatInTimeZone(sadhanaEntry.wakingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Woke Early < 5 AM IST: ${sadhanaEntry.wokeUpEarlyStatus ? 'Yes' : 'No'})` },
                     { name: 'Japa Rounds', value: sadhanaEntry.japaRounds.toString() },
-                    // Study Hours is not in the modal, display from database if available
+                    // Study Hours is now in the modal, display it.
                     { name: 'Study Hours', value: sadhanaEntry.studyHours.toString(), inline: true },
                     { name: 'Reading', value: sadhanaEntry.readingDetails || 'Not logged' },
                     { name: 'Listening Hours', value: sadhanaEntry.listeningHours.toString(), inline: true },
                     // Sleeping Time is not in the modal, display from database if available
                     { name: 'Sleeping Time', value: `${sadhanaEntry.sleepingTime === null ? 'Not Slept' : (sadhanaEntry.sleepingTime ? formatInTimeZone(sadhanaEntry.sleepingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Slept Early < 11 PM IST Previous Night: ${sadhanaEntry.sleptEarlyStatus ? 'Yes' : 'No'})` },
+                    // Regulative Principles are not in the modal, display from database if available
                     { name: 'Regulative Principles Followed', value: `Meat: ${sadhanaEntry.noMeatEating ? 'Yes' : 'No'}, Gambling: ${sadhanaEntry.noGambling ? 'Yes' : 'No'}, Illicit Sex: ${sadhanaEntry.noIllicitSex ? 'Yes' : 'No'}, Intoxication: ${sadhanaEntry.noIntoxication ? 'Yes' : 'No'}` }
                 )
                  .setFooter({ text: `Score for this log: ${sadhanaEntry.score} | Current Chanting Streak: ${userStreak.streakCount} day(s) 🙏` });
@@ -1894,14 +1899,20 @@ client.on('interactionCreate', async interaction => {
             } else if ((sadhanaEntry.japaRounds || 0) >= 16) {
                  encouragementMessages.push(`Fantastic job on chanting ${sadhanaEntry.japaRounds} rounds! Keep it up!`);
             }
-            if (!sadhanaEntry.noMeatEating || !sadhanaEntry.noGambling || !sadhanaEntry.noIllicitSex || !sadhanaEntry.noIntoxication) {
-                 const brokenPrinciples = [];
-                 if (!sadhanaEntry.noMeatEating) brokenPrinciples.push('Meat Eating');
-                 if (!sadhanaEntry.noGambling) brokenPrinciples.push('Gambling');
-                 if (!sadhanaEntry.noIllicitSex) brokenPrinciples.push('Illicit Sex');
-                 if (!sadhanaEntry.noIntoxication) brokenPrinciples.push('Intoxication');
-                 encouragementMessages.push(`Remember the importance of following the 4 regulative principles. You logged not following: ${brokenPrinciples.join(', ')}.`);
+            // Removed regulative principles encouragement as it's not in the modal
+            // if (!sadhanaEntry.noMeatEating || !sadhanaEntry.noGambling || !sadhanaEntry.noIllicitSex || !sadhanaEntry.noIntoxication) {
+            //      const brokenPrinciples = [];
+            //      if (!sadhanaEntry.noMeatEating) brokenPrinciples.push('Meat Eating');
+            //      if (!sadhanaEntry.noGambling) brokenPrinciples.push('Gambling');
+            //      if (!sadhanaEntry.noIllicitSex) brokenPrinciples.push('Illicit Sex');
+            //      if (!sadhanaEntry.noIntoxication) brokenPrinciples.push('Intoxication');
+            //      encouragementMessages.push(`Remember the importance of following the 4 regulative principles. You logged not following: ${brokenPrinciples.join(', ')}.`);
+            // }
+            // Added encouragement for study hours
+            if ((sadhanaEntry.studyHours || 0) < 0.1) {
+                encouragementMessages.push("Studying spiritual literature is vital. Dedicate some time to study today!");
             }
+
 
             if (encouragementMessages.length > 0) {
                  embed.setDescription("\n**Encouragement:**\n" + encouragementMessages.map(msg => `- ${msg}`).join('\n'));
