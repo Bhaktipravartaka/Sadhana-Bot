@@ -1855,38 +1855,40 @@ client.on('interactionCreate', async interaction => {
                 .setColor('#0099FF') // Blue color
                 .setTitle(`${isUpdatingExistingLog ? 'Updated' : 'New'} Daily Practice Log for ${interaction.user.username} on ${formattedLoggedDate}`)
                 .addFields(
-                    // Waking Time and Sleeping Time are not in the modal, display from database if available
-                    { name: 'Waking Time', value: `${sadhanaEntry.wakingTime === null ? 'Not Slept' : (sadhanaEntry.wakingTime ? formatInTimeZone(sadhanaEntry.wakingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Woke Early < 5 AM IST: ${sadhanaEntry.wokeUpEarlyStatus ? 'Yes' : 'No'})` },
+                    // Waking Time and Sleeping Time are not in the modal, do NOT display them here.
+                    // { name: 'Waking Time', value: `${sadhanaEntry.wakingTime === null ? 'Not Slept' : (sadhanaEntry.wakingTime ? formatInTimeZone(sadhanaEntry.wakingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Woke Early < 5 AM IST: ${sadhanaEntry.wokeUpEarlyStatus ? 'Yes' : 'No'})` }, // REMOVED
                     { name: 'Japa Rounds', value: sadhanaEntry.japaRounds.toString() },
                     // Study Hours is now in the modal, display it.
                     { name: 'Study Hours', value: sadhanaEntry.studyHours.toString(), inline: true },
                     { name: 'Reading', value: sadhanaEntry.readingDetails || 'Not logged' },
                     { name: 'Listening Hours', value: sadhanaEntry.listeningHours.toString(), inline: true },
-                    // Sleeping Time is not in the modal, display from database if available
-                    { name: 'Sleeping Time', value: `${sadhanaEntry.sleepingTime === null ? 'Not Slept' : (sadhanaEntry.sleepingTime ? formatInTimeZone(sadhanaEntry.sleepingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Slept Early < 11 PM IST Previous Night: ${sadhanaEntry.sleptEarlyStatus ? 'Yes' : 'No'})` },
-                    // Regulative Principles are not in the modal, display from database if available
-                    { name: 'Regulative Principles Followed', value: `Meat: ${sadhanaEntry.noMeatEating ? 'Yes' : 'No'}, Gambling: ${sadhanaEntry.noGambling ? 'Yes' : 'No'}, Illicit Sex: ${sadhanaEntry.noIllicitSex ? 'Yes' : 'No'}, Intoxication: ${sadhanaEntry.noIntoxication ? 'Yes' : 'No'}` }
+                    // Sleeping Time is not in the modal, do NOT display it here.
+                    // { name: 'Sleeping Time', value: `${sadhanaEntry.sleepingTime === null ? 'Not Slept' : (sadhanaEntry.sleepingTime ? formatInTimeZone(sadhanaEntry.sleepingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Slept Early < 11 PM IST Previous Night: ${sadhanaEntry.sleptEarlyStatus ? 'Yes' : 'No'})` }, // REMOVED
+                    // Regulative Principles are not in the modal, do NOT display them here.
+                    // { name: 'Regulative Principles Followed', value: `Meat: ${sadhanaEntry.noMeatEating ? 'Yes' : 'No'}, Gambling: ${sadhanaEntry.noGambling ? 'Yes' : 'No'}, Illicit Sex: ${sadhanaEntry.noIllicitSex ? 'Yes' : 'No'}, Intoxication: ${sadhanaEntry.noIntoxication ? 'Yes' : 'No'}` } // REMOVED
                 )
                  .setFooter({ text: `Score for this log: ${sadhanaEntry.score} | Current Chanting Streak: ${userStreak.streakCount} day(s) 🙏` });
 
-             // Additional Service is not in the modal, display from database if available
+             // Additional Service is not in the modal, display from database if available (This is fine as it's not from modal input)
              if (sadhanaEntry.additionalService) {
                  embed.addFields({ name: 'Additional Service', value: sadhanaEntry.additionalService });
              }
 
              // --- Add Encouragement Messages to description or a field ---
              let encouragementMessages = [];
-            if (sadhanaEntry.wakingTime !== null && !sadhanaEntry.wokeUpEarlyStatus) {
-                encouragementMessages.push("Aim to wake up before 5 AM IST for maximum spiritual benefit!");
-            } else if (sadhanaEntry.wakingTime === null) {
-                 encouragementMessages.push("Taking rest is important. Hope you can establish a regular waking time soon.");
-            }
+            // Waking Time encouragement removed as it's not in the modal
+            // if (sadhanaEntry.wakingTime !== null && !sadhanaEntry.wokeUpEarlyStatus) {
+            //     encouragementMessages.push("Aim to wake up before 5 AM IST for maximum spiritual benefit!");
+            // } else if (sadhanaEntry.wakingTime === null) {
+            //      encouragementMessages.push("Taking rest is important. Hope you can establish a regular waking time soon.");
+            // }
 
-            if (sadhanaEntry.sleepingTime !== null && !sadhanaEntry.sleptEarlyStatus) {
-                encouragementMessages.push("Try to get to bed before 11 PM IST for restful sleep.");
-            } else if (sadhanaEntry.sleepingTime === null) {
-                encouragementMessages.push("Taking rest is important. Hope you can establish a regular sleeping time soon.");
-            }
+            // Sleeping Time encouragement removed as it's not in the modal
+            // if (sadhanaEntry.sleepingTime !== null && !sadhanaEntry.sleptEarlyStatus) {
+            //     encouragementMessages.push("Try to get to bed before 11 PM IST for restful sleep.");
+            // } else if (sadhanaEntry.sleepingTime === null) {
+            //     encouragementMessages.push("Taking rest is important. Hope you can establish a regular sleeping time soon.");
+            // }
 
             if (!sadhanaEntry.readingDetails || sadhanaEntry.readingDetails.trim() === '') {
                  encouragementMessages.push("Reading is essential! Pick up a spiritual book today.");
@@ -1899,7 +1901,7 @@ client.on('interactionCreate', async interaction => {
             } else if ((sadhanaEntry.japaRounds || 0) >= 16) {
                  encouragementMessages.push(`Fantastic job on chanting ${sadhanaEntry.japaRounds} rounds! Keep it up!`);
             }
-            // Removed regulative principles encouragement as it's not in the modal
+            // Regulative principles encouragement removed as it's not in the modal
             // if (!sadhanaEntry.noMeatEating || !sadhanaEntry.noGambling || !sadhanaEntry.noIllicitSex || !sadhanaEntry.noIntoxication) {
             //      const brokenPrinciples = [];
             //      if (!sadhanaEntry.noMeatEating) brokenPrinciples.push('Meat Eating');
