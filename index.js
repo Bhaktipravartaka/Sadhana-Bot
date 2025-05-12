@@ -7,7 +7,7 @@ const { Client, GatewayIntentBits, REST, Routes, PermissionsBitField, MessageFla
 
 // Using date-fns for robust date/time parsing and comparison
 // Make sure 'date-fns' is installed: npm install date-fns
-const { parse, differenceInCalendarDays, addDays, format, startOfDay, endOfDay, startOfMonth } = require('date-fns');
+const { parse, differenceInCalendarDays, addDays, format, startOfDay, endOfDay, startOfMonth, setHours, setMinutes, setSeconds, isBefore, differenceInMilliseconds } = require('date-fns');
 
 // For timezone handling - Needed for accurate IST time comparisons
 // IMPORTANT: Make sure 'date-fns-tz' (v2 or later) is installed: npm install date-fns-tz
@@ -16,15 +16,24 @@ const { toZonedTime, fromZonedTime, formatInTimeZone } = require('date-fns-tz');
 // Import Sequelize and DataTypes
 const { Sequelize, DataTypes } = require('sequelize'); // Import Sequelize and DataTypes
 
+// Import node-cron for scheduling tasks
+// Make sure 'node-cron' is installed: npm install node-cron
+const cron = require('node-cron');
+
+
 // Get bot token, client ID, guild ID, and PostgreSQL URI from environment variables.
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.CLIENT_ID;
 const guildId = process.env.GUILD_ID; // Your server's ID (Guild ID) for faster testing
 const postgresUri = process.env.POSTGRES_URI; // Get the PostgreSQL URI from .env
-
+const announcementChannelId = process.env.ANNOUNCEMENT_CHANNEL_ID; // Add this to your .env file
 
 // Define the timezone for IST
 const IST_TIMEZONE = 'Asia/Kolkata'; // IANA timezone name for India Standard Time
+
+// Define the daily cutoff time for logging practice (e.g., 11:59 PM IST)
+const DAILY_CUTOFF_HOUR_IST = 23; // 23 for 11 PM
+const DAILY_CUTOFF_MINUTE_IST = 59; // 59 for 59 minutes
 
 
 // --- Database Connection using Sequelize ---
@@ -264,7 +273,7 @@ const client = new Client({
 
 
 // --- Define Slash Commands ---
-// Added /chant command definition
+// Added /chant and /streaklog command definitions
 const commands = [
      {
         name: 'chant',
@@ -356,7 +365,7 @@ const commands = [
     },
      {
         name: 'help',
-        description: 'Provides a link to a helpful YouTube video.',
+        description: 'Provides information about the bot commands.', // Updated description
     },
     {
         name: 'checkdata',
@@ -407,6 +416,10 @@ const commands = [
             },
         ],
         default_member_permissions: PermissionsBitField.Flags.Administrator.toString(),
+    },
+     {
+        name: 'streaklog',
+        description: 'Shows the current chanting streak leaderboard.',
     },
 ];
 
@@ -516,6 +529,133 @@ logPracticeModal.addComponents(
 client.once('ready', () => {
     console.log(`Logged in as ${client.user.tag}!`);
     console.log('Bot is online and ready to receive slash commands and modal submissions!');
+
+    // --- Schedule Cron Jobs ---
+
+    // Schedule daily streak warning DM (e.g., at 10:00 PM IST)
+    // Cron format: minute hour day-of-month month day-of-week
+    // Example: '0 22 * * *' runs at 22:00 (10:00 PM) every day
+    cron.schedule('0 22 * * *', async () => {
+        console.log(`[${new Date().toISOString()}] Running daily streak warning job.`);
+        try {
+            const now = new Date();
+            const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE));
+
+            // Calculate the cutoff time for today in IST
+            let cutoffTimeTodayIST = setHours(setMinutes(setSeconds(todayIST, 0), DAILY_CUTOFF_MINUTE_IST), DAILY_CUTOFF_HOUR_IST);
+             // If the current time is past the cutoff time, the cutoff is for the *next* day.
+             // However, for the warning, we want to warn *before* today's cutoff.
+             // So, we just need today's cutoff time.
+
+            // Fetch all users with a streak > 0
+            const usersWithStreaks = await UserStreak.findAll({
+                where: {
+                    streakCount: { [Sequelize.Op.gt]: 0 }
+                }
+            });
+
+            console.log(`[${new Date().toISOString()}] Found ${usersWithStreaks.length} users with streaks.`);
+
+            for (const userStreak of usersWithStreaks) {
+                const userId = userStreak.userId;
+
+                // Check if the user has logged practice for today
+                const todayLog = await Sadhana.findOne({
+                    where: {
+                        userId: userId,
+                        date: todayIST // Check for log on the start of today in IST
+                    }
+                });
+
+                // If no log for today, send a warning DM
+                if (!todayLog) {
+                    try {
+                        const user = await client.users.fetch(userId);
+                        if (user) {
+                            // Calculate remaining time until cutoff
+                            const nowIST = toZonedTime(new Date(), IST_TIMEZONE);
+                            const timeRemainingMs = differenceInMilliseconds(cutoffTimeTodayIST, nowIST);
+
+                            if (timeRemainingMs > 0) { // Only send if there's time remaining today
+                                const hours = Math.floor(timeRemainingMs / (1000 * 60 * 60));
+                                const minutes = Math.floor((timeRemainingMs % (1000 * 60 * 60)) / (1000 * 60));
+
+                                const warningMessage = `Hare Krishna! 🙏 Your chanting streak of ${userStreak.streakCount} day(s) is about to be lost! You haven't logged your practice for today yet.`;
+                                const timeRemainingMessage = `You have about ${hours} hours and ${minutes} minutes remaining to log your rounds using \`/chant <rounds>\` or log your full practice using \`/logpractice\`. Don't miss your streak!`;
+
+                                const embed = new EmbedBuilder()
+                                    .setColor('#FFCC00') // Yellow/Orange color for warning
+                                    .setTitle('Streak Warning!')
+                                    .setDescription(`${warningMessage}\n${timeRemainingMessage}`);
+
+                                await user.send({ embeds: [embed] });
+                                console.log(`[${new Date().toISOString()}] Sent streak warning DM to user ${userId}`);
+                            } else {
+                                console.log(`[${new Date().toISOString()}] Skipping streak warning DM for user ${userId} as cutoff time has passed.`);
+                            }
+                        } else {
+                            console.warn(`[${new Date().toISOString()}] Could not fetch user ${userId} for streak warning DM.`);
+                        }
+                    } catch (dmError) {
+                        console.error(`[${new Date().toISOString()}] Failed to send streak warning DM to user ${userId}:`, dmError);
+                        // This error might occur if the user has DMs disabled
+                    }
+                } else {
+                    console.log(`[${new Date().toISOString()}] User ${userId} has already logged today. No streak warning needed.`);
+                }
+            }
+
+        } catch (error) {
+            console.error(`[${new Date().toISOString()}] Error during daily streak warning job:`, error);
+        }
+    }, {
+        scheduled: true,
+        timezone: IST_TIMEZONE // Ensure the cron job runs based on IST
+    });
+
+    // Schedule daily announcement message (e.g., at 8:00 AM IST)
+    // Example: '0 8 * * *' runs at 8:00 AM every day
+    cron.schedule('0 8 * * *', async () => {
+        console.log(`[${new Date().toISOString()}] Running daily announcement job.`);
+        if (!announcementChannelId) {
+            console.warn(`[${new Date().toISOString()}] ANNOUNCEMENT_CHANNEL_ID is not set in .env. Skipping daily announcement.`);
+            return;
+        }
+
+        try {
+            const channel = await client.channels.fetch(announcementChannelId);
+            if (channel && channel.isTextBased()) {
+                const embed = new EmbedBuilder()
+                    .setColor('#0099FF') // Blue color
+                    .setTitle('Daily Practice Reminder!')
+                    .setDescription(`Hare Krishna! 🙏 Remember to log your spiritual practices for today.\n\n`
+                                  + `Quickly log your japa rounds using \`/chant <rounds>\`.\n`
+                                  + `Log your full practice details using \`/logpractice\`.`);
+
+                // Use channel.send to send the message
+                // To mention everyone, you would add allowedMentions and content: '@everyone'
+                // However, mentioning @everyone frequently can be disruptive.
+                // A better approach might be to mention a specific role or just send the message without a mass mention.
+                // For now, sending without @everyone mention. If you need @everyone, uncomment the allowedMentions line and add content: '@everyone'
+                await channel.send({
+                    // content: '@everyone', // Uncomment this line to mention everyone (requires bot permissions)
+                    embeds: [embed],
+                    // allowedMentions: { parse: ['everyone'] } // Uncomment this line if mentioning everyone
+                });
+                console.log(`[${new Date().toISOString()}] Sent daily announcement to channel ${announcementChannelId}`);
+
+            } else {
+                console.warn(`[${new Date().toISOString()}] Could not fetch or send to announcement channel with ID: ${announcementChannelId}. Please check the ID and bot permissions.`);
+            }
+        } catch (error) {
+            console.error(`[${new Date().toISOString()}] Error during daily announcement job:`, error);
+        }
+    }, {
+        scheduled: true,
+        timezone: IST_TIMEZONE // Ensure the cron job runs based on IST
+    });
+
+
 });
 
 client.on('interactionCreate', async interaction => {
@@ -597,7 +737,7 @@ client.on('interactionCreate', async interaction => {
             }
 
             // Recalculate and save the score
-            sadhanaEntry.score = calculateScore(sadhanaEntry);
+            sadhanaEntry.score = calculateScore(shanaEntry);
 
             console.log(`[${new Date().toISOString()}] Starting database save for /chant for user ${userId} on ${format(todayIST, 'yyyy-MM-dd')}`);
             try {
@@ -663,7 +803,7 @@ client.on('interactionCreate', async interaction => {
 
                 if (!lastLoggedDateKey || (todayIST > lastLoggedDate)) {
                      userStreak.streakCount = newStreak;
-                     userStreak.lastLoggedDateKey = format(todayIST, 'yyyy-MM-MM-dd'); // Use yyyy-MM-dd format
+                     userStreak.lastLoggedDateKey = format(todayIST, 'yyyy-MM-dd'); // Use yyyy-MM-dd format
                 } else {
                      newStreak = userStreak.streakCount;
                 }
@@ -1449,8 +1589,20 @@ client.on('interactionCreate', async interaction => {
             // Create an embed for the help command
             const embed = new EmbedBuilder()
                 .setColor('#FFFF00') // Yellow color
-                .setTitle('Helpful Resources')
-                .setDescription(`Here is a helpful video: ${youtubeLink}`); // Added setDescription
+                .setTitle('Helpful Resources and Commands') // Updated title
+                .setDescription(`Here is a helpful video: ${youtubeLink}\n\n`
+                              + `**Available Commands:**\n` // Updated description format
+                              + `- \`/chant <rounds>\`: Quickly log your japa rounds for today and update your chanting streak.\n`
+                              + `- \`/logpractice\`: Open a form to log your full daily practice details.\n`
+                              + `- \`/weeklysummary\`: Shows your practice summary for the last 7 days.\n`
+                              + `- \`/monthlysummary\`: Shows your practice summary for the current month.\n`
+                              + `- \`/leaderboard <period>\`: Shows the top devotees based on practice scores (weekly or monthly).\n`
+                              + `- \`/myscore <period>\`: Shows your personal practice score for a specific period (weekly or monthly).\n`
+                              + `- \`/showscore <user>\`: Shows a user's practice scores and streak.\n`
+                              + `- \`/streaklog\`: Shows the current chanting streak leaderboard.\n` // Added /streaklog info
+                              + `- \`/streakset <user> <streak>\`: Sets a user's chanting streak (Admin only).\n`
+                              + `- \`/checkdata <type> [user] [date_string]\`: Check specific data from the database (Admin only).`);
+
 
             console.log(`[${new Date().toISOString()}] Attempting to reply for help command for user ${interaction.user.tag}`);
             // Reply with embed
@@ -1691,6 +1843,76 @@ client.on('interactionCreate', async interaction => {
             }
 
         }
+         // --- Handle /streaklog command ---
+        else if (commandName === 'streaklog') {
+            console.log(`[${new Date().toISOString()}] Handling /streaklog command for user ${interaction.user.tag}`);
+            // Defer the reply immediately
+            try {
+                await interaction.deferReply();
+                console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+            } catch (deferError) {
+                 console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                 return;
+            }
+            console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+
+            // --- Database Interaction for /streaklog ---
+            let userStreaks;
+            console.log(`[${new Date().toISOString()}] Starting database query for streaklog`);
+            try {
+                 userStreaks = await UserStreak.findAll({
+                    order: [['streakCount', 'DESC']], // Order by streak count descending
+                    limit: 10 // Limit to top 10 for a cleaner display
+                });
+                 console.log(`[${new Date().toISOString()}] Finished database query for streaklog. Found ${userStreaks.length} entries.`);
+            } catch (dbError) {
+                 console.error(`[${new Date().toISOString()}] Database error during findAll for streaklog:`, dbError);
+                  const embed = new EmbedBuilder()
+                      .setColor('#FF0000')
+                      .setTitle('Streak Leaderboard Failed')
+                      .setDescription('An error occurred while fetching streak data. Please try again later.');
+                  await interaction.editReply({ embeds: [embed] });
+                  return;
+            }
+
+            // Create an embed for the streak leaderboard
+            const embed = new EmbedBuilder()
+                .setColor('#FF6347') // Tomato color
+                .setTitle('Chanting Streak Leaderboard 🔥');
+
+            if (userStreaks.length === 0) {
+                embed.setDescription("No chanting streaks found yet.");
+            } else {
+                let leaderboardDescription = '';
+                for (let i = 0; i < userStreaks.length; i++) {
+                    const userStreak = userStreaks[i];
+                    let username = 'Unknown User';
+                     try {
+                         if (interaction.guild) {
+                            const member = await interaction.guild.members.fetch(userStreak.userId);
+                             username = member.user.globalName || member.user.username; // Prefer global name
+                         } else {
+                             const user = await client.users.fetch(userStreak.userId);
+                             username = user.globalName || user.username; // Prefer global name
+                         }
+                     } catch (err) {
+                         console.warn(`Could not fetch user/member ${userStreak.userId}:`, err.message);
+                         username = `User ID: ${userStreak.userId}`;
+                     }
+
+                    leaderboardDescription += `${i + 1}. **${username}**: ${userStreak.streakCount} day(s) 🙏\n`;
+                }
+                embed.setDescription(leaderboardDescription);
+            }
+
+            console.log(`[${new Date().toISOString()}] Attempting to editReply for /streaklog command`);
+            try {
+                 await interaction.editReply({ embeds: [embed] });
+                 console.log(`[${new Date().toISOString()}] Successfully edited reply for /streaklog command`);
+            } catch (editError) {
+                 console.error(`[${new Date().toISOString()}] Error editing reply for /streaklog command:`, editError);
+            }
+        }
     }
 
     // --- Handle Modal Submit Interactions ---
@@ -1909,8 +2131,6 @@ client.on('interactionCreate', async interaction => {
                         noGambling: false, // Set to false
                         noIllicitSex: false, // Set to false
                         noIntoxication: false, // Set to false
-                        // additionalService is not in the modal, so it won't be in defaults for new entries.
-                        // If updating, it will retain its previous value or be null if it didn't exist.
                         additionalService: '', // Set to empty string
                         score: 0, // Calculate score after updating
                     }
