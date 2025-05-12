@@ -511,7 +511,7 @@ const listeningHoursInput = new TextInputBuilder()
 //     .setLabel('Additional Service (Optional)')
 //     .setStyle(TextInputStyle.Paragraph)
 //     .setRequired(false) // This is optional
-//     .setPlaceholder('e.g., Distributed flyers, Cleaned temple');
+    // .setPlaceholder('e.g., Distributed flyers, Cleaned temple');
 
 
 // Add inputs to the modal, grouping them into 5 Action Rows, one input per row for short inputs.
@@ -636,7 +636,7 @@ client.once('ready', () => {
                 // To mention everyone, you would add allowedMentions and content: '@everyone'
                 // However, mentioning @everyone frequently can be disruptive.
                 // A better approach might be to mention a specific role or just send the message without a mass mention.
-                // For now, sending without @everyone mention. If you need @everyone, uncomment the allowedMentions line and add content: '@everyone'
+                // For now, sending without @everyone mention. If you need @everyone, uncomment the content and allowedMentions lines.
                 await channel.send({
                     // content: '@everyone', // Uncomment this line to mention everyone (requires bot permissions)
                     embeds: [embed],
@@ -737,7 +737,7 @@ client.on('interactionCreate', async interaction => {
             }
 
             // Recalculate and save the score
-            sadhanaEntry.score = calculateScore(shanaEntry);
+            sadhanaEntry.score = calculateScore(sadhanaEntry); // Corrected typo here
 
             console.log(`[${new Date().toISOString()}] Starting database save for /chant for user ${userId} on ${format(todayIST, 'yyyy-MM-dd')}`);
             try {
