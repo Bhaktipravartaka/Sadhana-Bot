@@ -264,8 +264,20 @@ const client = new Client({
 
 
 // --- Define Slash Commands ---
-// Modified /logpractice command definition to be simpler
+// Added /chant command definition
 const commands = [
+     {
+        name: 'chant',
+        description: 'Log your japa rounds chanted for today.',
+        options: [
+            {
+                name: 'rounds',
+                type: 4, // INTEGER
+                description: 'The number of rounds chanted.',
+                required: true,
+            },
+        ],
+    },
     {
         name: 'logpractice',
         description: 'Log your daily spiritual practices using a form.',
@@ -513,7 +525,195 @@ client.on('interactionCreate', async interaction => {
     if (interaction.isCommand()) {
         const { commandName } = interaction;
 
-        if (commandName === 'logpractice') {
+        // --- Handle /chant command ---
+        if (commandName === 'chant') {
+            console.log(`[${new Date().toISOString()}] Handling /chant command for user ${interaction.user.tag}`);
+            // Defer the reply immediately
+            try {
+                await interaction.deferReply();
+                console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+            } catch (deferError) {
+                 console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                 return;
+            }
+            console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+
+            const rounds = interaction.options.getInteger('rounds');
+            const userId = interaction.user.id;
+            const guildId = interaction.guild?.id;
+            const todayIST = startOfDay(toZonedTime(new Date(), IST_TIMEZONE)); // Get start of today in IST
+
+            if (rounds < 0) {
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000')
+                     .setTitle('Chanting Log Failed')
+                     .setDescription('Number of rounds cannot be negative.');
+                 await interaction.editReply({ embeds: [embed] });
+                 return;
+            }
+
+            // --- Database Interaction for /chant ---
+            let sadhanaEntry;
+            let created;
+            console.log(`[${new Date().toISOString()}] Starting database findOrCreate for /chant for user ${userId} on ${format(todayIST, 'yyyy-MM-dd')}`);
+            try {
+                 [sadhanaEntry, created] = await Sadhana.findOrCreate({
+                    where: { userId: userId, date: todayIST },
+                    defaults: {
+                        userId: userId,
+                        guildId: guildId,
+                        date: todayIST,
+                        japaRounds: rounds,
+                         // Set other fields to default values as they are not provided by /chant
+                        studyHours: 0,
+                        listeningHours: 0,
+                        readingDetails: '',
+                        wakingTime: null,
+                        wokeUpEarlyStatus: false,
+                        sleepingTime: null,
+                        sleptEarlyStatus: false,
+                        noMeatEating: false,
+                        noGambling: false,
+                        noIllicitSex: false,
+                        noIntoxication: false,
+                        additionalService: '',
+                        score: 0, // Calculate score after updating
+                    }
+                });
+                 console.log(`[${new Date().toISOString()}] Finished database findOrCreate for /chant. Created: ${created}`);
+            } catch (dbError) {
+                console.error(`Database error during findOrCreate for /chant:`, dbError);
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000')
+                     .setTitle('Chanting Log Failed')
+                     .setDescription('An error occurred while accessing the database. Please try again later.');
+                 await interaction.editReply({ embeds: [embed] });
+                 return;
+            }
+
+            // If updating, update the japa rounds
+            if (!created) {
+                sadhanaEntry.japaRounds = rounds;
+            }
+
+            // Recalculate and save the score
+            sadhanaEntry.score = calculateScore(sadhanaEntry);
+
+            console.log(`[${new Date().toISOString()}] Starting database save for /chant for user ${userId} on ${format(todayIST, 'yyyy-MM-dd')}`);
+            try {
+                await sadhanaEntry.save();
+                 console.log(`[${new Date().toISOString()}] Finished database save for /chant.`);
+            } catch (dbError) {
+                console.error(`Database error during save for /chant:`, dbError);
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000')
+                     .setTitle('Chanting Log Failed')
+                     .setDescription('An error occurred while saving to the database. Please try again later.');
+                 await interaction.editReply({ embeds: [embed] });
+                 return;
+            }
+
+
+            // --- Chanting Streak Logic for /chant ---
+             // Find or create the user's streak entry
+            let userStreak;
+            let streakCreated;
+            console.log(`[${new Date().toISOString()}] Starting database findOrCreate for streak (/chant) for user ${userId}`);
+            try {
+                 [userStreak, streakCreated] = await UserStreak.findOrCreate({
+                    where: { userId: userId },
+                    defaults: {
+                        userId: userId,
+                        streakCount: 0,
+                        lastLoggedDateKey: null,
+                    }
+                });
+                 console.log(`[${new Date().toISOString()}] Finished database findOrCreate for streak (/chant). Created: ${streakCreated}`);
+            } catch (dbError) {
+                 console.error(`Database error during findOrCreate for streak (/chant):`, dbError);
+                  const embed = new EmbedBuilder()
+                      .setColor('#FF0000')
+                      .setTitle('Chanting Log Failed')
+                      .setDescription('An error occurred while accessing streak data. Please try again later.');
+                  await interaction.editReply({ embeds: [embed] });
+                  return;
+            }
+
+
+            let currentStreak = userStreak.streakCount;
+            const lastLoggedDateKey = userStreak.lastLoggedDateKey;
+            let newStreak = currentStreak;
+
+            const lastLoggedDate = lastLoggedDateKey ? startOfDay(parse(lastLoggedDateKey, 'yyyy-MM-dd', new Date())) : null;
+
+            if (todayIST && !isNaN(todayIST.getTime())) {
+                if (lastLoggedDate && !isNaN(lastLoggedDate.getTime())) {
+                    const dayDifference = differenceInCalendarDays(todayIST, lastLoggedDate);
+
+                    if (dayDifference === 1) {
+                        newStreak = currentStreak + 1;
+                    } else if (dayDifference > 1) {
+                        newStreak = 1; // Reset streak
+                    } else if (dayDifference <= 0 && format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
+                        newStreak = currentStreak;
+                    }
+                } else {
+                    newStreak = 1;
+                }
+
+                if (!lastLoggedDateKey || (todayIST > lastLoggedDate)) {
+                     userStreak.streakCount = newStreak;
+                     userStreak.lastLoggedDateKey = format(todayIST, 'yyyy-MM-MM-dd'); // Use yyyy-MM-dd format
+                } else {
+                     newStreak = userStreak.streakCount;
+                }
+            } else {
+                 console.error(`Invalid todayIST date for streak logic (/chant): ${todayIST}`);
+                 // Optionally, reply with an embed for this error case
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000')
+                     .setTitle('Chanting Log Failed')
+                     .setDescription('Internal error processing log date for streak calculation. Please contact bot administrator.');
+                 await interaction.editReply({ embeds: [embed] });
+                 return;
+            }
+
+            console.log(`[${new Date().toISOString()}] Starting database save for streak (/chant) for user ${userId}`);
+            try {
+                 await userStreak.save();
+                 console.log(`[${new Date().toISOString()}] Finished database save for streak (/chant).`);
+            } catch (dbError) {
+                 console.error(`Database error during save for streak (/chant):`, dbError);
+                  const embed = new EmbedBuilder()
+                      .setColor('#FF0000')
+                      .setTitle('Chanting Log Failed')
+                      .setDescription('An error occurred while saving streak data. Please try again later.');
+                  await interaction.editReply({ embeds: [embed] });
+                  return;
+            }
+
+
+            // --- Create an embed response message for /chant ---
+            const embed = new EmbedBuilder()
+                .setColor('#00FF00') // Green color
+                .setTitle('Japa Rounds Logged!')
+                .setDescription(`You logged **${sadhanaEntry.japaRounds}** rounds for today (${format(todayIST, 'dd/MM/yyyy')}).`)
+                .addFields(
+                     { name: 'Score for today (so far)', value: sadhanaEntry.score.toString(), inline: true },
+                     { name: 'Current Chanting Streak', value: `${userStreak.streakCount} day(s) 🙏`, inline: true }
+                );
+
+            console.log(`[${new Date().toISOString()}] Attempting to editReply for /chant command for user ${userId}`);
+            try {
+                 await interaction.editReply({ embeds: [embed] });
+                 console.log(`[${new Date().toISOString()}] Successfully edited reply for /chant command for user ${userId}`);
+            } catch (editError) {
+                 console.error(`[${new Date().toISOString()}] Error editing reply for /chant command for user ${userId}:`, editError);
+            }
+
+
+        }
+        else if (commandName === 'logpractice') {
             console.log(`[${new Date().toISOString()}] Handling /logpractice command for user ${interaction.user.tag}`);
             // Show the modal instead of deferring and processing directly
             try {
@@ -1912,7 +2112,7 @@ client.on('interactionCreate', async interaction => {
             // }
             // Added encouragement for study hours
             if ((sadhanaEntry.studyHours || 0) < 0.1) {
-                encouragementMessages.push("Dedicate some time to study today!");
+                encouragementMessages.push("Studying spiritual literature is vital. Dedicate some time to study today!");
             }
 
 
