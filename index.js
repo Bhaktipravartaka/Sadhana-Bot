@@ -1,6 +1,8 @@
 // Load environment variables from .env file
 require('dotenv').config();
 
+const http = require('http');
+
 // Import necessary classes from discord.js
 // Added ModalBuilder, TextInputBuilder, TextInputStyle
 const { Client, GatewayIntentBits, REST, Routes, PermissionsBitField, MessageFlags, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
