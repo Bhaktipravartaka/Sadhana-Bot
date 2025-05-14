@@ -23,11 +23,13 @@ const { Sequelize, DataTypes } = require('sequelize'); // Import Sequelize and D
 const cron = require('node-cron');
 
 
-// Get bot token, client ID, guild ID, and PostgreSQL URI from environment variables.
+// Get bot token, client ID, guild ID, and SQLite URI from environment variables.
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.CLIENT_ID;
 const guildId = process.env.GUILD_ID; // Your server's ID (Guild ID) for faster testing
-const postgresUri = process.env.POSTGRES_URI; // Get the PostgreSQL URI from .env
+// Define the path for the SQLite database file
+// You can make this configurable via .env if needed, but hardcoding is simpler
+const SQLITE_DB_PATH = 'database.sqlite'; // The name of your database file
 const announcementChannelId = process.env.ANNOUNCEMENT_CHANNEL_ID; // Add this to your .env file
 
 // Define the timezone for IST
@@ -41,39 +43,22 @@ const DAILY_CUTOFF_MINUTE_IST = 59; // 59 for 59 minutes
 const ENTRIES_PER_PAGE = 10;
 
 
-// --- Database Connection using Sequelize ---
-// Create a new Sequelize instance
-const sequelize = new Sequelize(postgresUri, {
-    dialect: 'postgres', // Specify the database dialect
+// --- Database Connection using Sequelize (Modified for SQLite) ---
+// Create a new Sequelize instance for SQLite
+const sequelize = new Sequelize({
+    dialect: 'sqlite', // Specify the database dialect as sqlite
+    storage: SQLITE_DB_PATH, // Specify the path to the SQLite database file
     logging: console.log, // Optional: enable logging of SQL queries
-    dialectOptions: {
-        ssl: {
-            require: true, // Require SSL connection for production
-            rejectUnauthorized: false // Adjust based on your PostgreSQL provider's SSL cert
-        }
-    },
-    // Add connection pool options if needed for performance
-    pool: {
-        max: 5,
-        min: 0,
-        acquire: 30000,
-        idle: 10000
-    },
-    // --- Adjusted Timeout Options (Sequelize uses different options) ---
-    // Sequelize connection options are different from MongoClient.
-    // Timeouts are often handled at the pool or query level.
-    // You might need to configure these based on your specific needs and PostgreSQL setup.
-    // connectTimeout: 30000, // Example: connection timeout (might not be directly supported by dialect)
-    // acquire: 30000 // Example: pool acquire timeout
-    // --- End Adjusted Timeout Options ---
+    // Removed dialectOptions.ssl as it's specific to SQLite
+    // Removed connection pool options, Sequelize handles connection pooling differently for SQLite
 });
 
 async function connectDB() {
     try {
-        console.log("Attempting to connect to PostgreSQL...");
+        console.log("Attempting to connect to SQLite...");
         // Authenticate the connection
         await sequelize.authenticate();
-        console.log('PostgreSQL connection has been established successfully.');
+        console.log('SQLite connection has been established successfully.');
 
         // Sync models with the database (creates tables if they don't exist)
         // Use { alter: true } carefully in production as it modifies existing tables
@@ -81,7 +66,7 @@ async function connectDB() {
         console.log("Database synchronized.");
 
     } catch (error) {
-        console.error('Unable to connect to the PostgreSQL database:', error);
+        console.error('Unable to connect to the SQLite database:', error);
         // Exit the process if database connection fails
         process.exit(1);
     }
@@ -199,7 +184,7 @@ const UserStreak = sequelize.define('UserStreak', {
 
 // Helper function to parse time string with date context and convert to IST
 // This logic would remain similar, but you'd work with standard Date objects
-// before saving to PostgreSQL.
+// before saving to SQLite.
 function parseTimeInIST(dateKey, timeString) {
     try {
         const dateTimeString = `${dateKey} ${timeString}`;
