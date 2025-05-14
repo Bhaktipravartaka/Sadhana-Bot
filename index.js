@@ -4,8 +4,8 @@ require('dotenv').config();
 const http = require('http');
 
 // Import necessary classes from discord.js
-// Added ModalBuilder, TextInputBuilder, TextInputStyle
-const { Client, GatewayIntentBits, REST, Routes, PermissionsBitField, MessageFlags, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+// Added ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle
+const { Client, GatewayIntentBits, REST, Routes, PermissionsBitField, MessageFlags, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 // Using date-fns for robust date/time parsing and comparison
 // Make sure 'date-fns' is installed: npm install date-fns
@@ -36,6 +36,9 @@ const IST_TIMEZONE = 'Asia/Kolkata'; // IANA timezone name for India Standard Ti
 // Define the daily cutoff time for logging practice (e.g., 11:59 PM IST)
 const DAILY_CUTOFF_HOUR_IST = 23; // 23 for 11 PM
 const DAILY_CUTOFF_MINUTE_IST = 59; // 59 for 59 minutes
+
+// Define how many entries per page for the streakboard
+const ENTRIES_PER_PAGE = 10;
 
 
 // --- Database Connection using Sequelize ---
@@ -275,7 +278,7 @@ const client = new Client({
 
 
 // --- Define Slash Commands ---
-// Added /chant and /streaklog command definitions
+// Renamed /streaklog to /streakboard and added it to the commands
 const commands = [
      {
         name: 'chant',
@@ -420,7 +423,7 @@ const commands = [
         default_member_permissions: PermissionsBitField.Flags.Administrator.toString(),
     },
      {
-        name: 'streaklog',
+        name: 'streakboard', // Renamed from streaklog
         description: 'Shows the current chanting streak leaderboard.',
     },
 ];
@@ -524,6 +527,62 @@ logPracticeModal.addComponents(
     { type: 1, components: [listeningHoursInput] }, // Row 4: Listening Hours (Short)
     { type: 1, components: [readingDetailsInput] } // Row 5: Reading Details (Paragraph)
 );
+
+
+// --- Helper function to generate a streakboard page embed and components ---
+async function generateStreakboardPage(streaks, page, totalPages, interaction) {
+    const start = page * ENTRIES_PER_PAGE;
+    const end = start + ENTRIES_PER_PAGE;
+    const entriesToShow = streaks.slice(start, end);
+
+    const embed = new EmbedBuilder()
+        .setColor('#FF6347') // Tomato color
+        .setTitle('Chanting Streak Leaderboard 🔥')
+        .setFooter({ text: `Page ${page + 1} of ${totalPages}` });
+
+    if (streaks.length === 0) {
+        embed.setDescription("No chanting streaks found yet.");
+    } else {
+        let leaderboardDescription = '';
+        for (let i = 0; i < entriesToShow.length; i++) {
+            const userStreak = entriesToShow[i];
+            const globalRank = start + i + 1; // Calculate global rank
+            let username = 'Unknown User';
+             try {
+                 if (interaction.guild) {
+                    const member = await interaction.guild.members.fetch(userStreak.userId);
+                     username = member.user.globalName || member.user.username; // Prefer global name
+                 } else {
+                     const user = await client.users.fetch(userStreak.userId);
+                     username = user.globalName || user.username; // Prefer global name
+                 }
+             } catch (err) {
+                 console.warn(`Could not fetch user/member ${userStreak.userId}:`, err.message);
+                 username = `User ID: ${userStreak.userId}`;
+             }
+
+            leaderboardDescription += `${globalRank}. **${username}**: ${userStreak.streakCount} day(s) 🙏\n`;
+        }
+        embed.setDescription(leaderboardDescription);
+    }
+
+    // Create pagination buttons
+    const row = new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setCustomId(`streakboard_page_${page - 1}`)
+                .setLabel('Previous')
+                .setStyle(ButtonStyle.Primary)
+                .setDisabled(page === 0), // Disable if on the first page
+            new ButtonBuilder()
+                .setCustomId(`streakboard_page_${page + 1}`)
+                .setLabel('Next')
+                .setStyle(ButtonStyle.Primary)
+                .setDisabled(page >= totalPages - 1), // Disable if on the last page
+        );
+
+    return { embeds: [embed], components: [row] };
+}
 
 
 // --- Bot Event Handlers ---
@@ -661,7 +720,7 @@ client.once('ready', () => {
 });
 
 client.on('interactionCreate', async interaction => {
-    console.log(`[${new Date().toISOString()}] Interaction received: ${interaction.id}, Type: ${interaction.type}, Command: ${interaction.isCommand() ? interaction.commandName : 'N/A'}, Modal: ${interaction.isModalSubmit() ? interaction.customId : 'N/A'}`);
+    console.log(`[${new Date().toISOString()}] Interaction received: ${interaction.id}, Type: ${interaction.type}, Command: ${interaction.isCommand() ? interaction.commandName : 'N/A'}, Modal: ${interaction.isModalSubmit() ? interaction.customId : 'N/A'}, Button: ${interaction.isButton() ? interaction.customId : 'N/A'}`);
 
     // --- Handle Slash Command Interactions ---
     if (interaction.isCommand()) {
@@ -1601,7 +1660,7 @@ client.on('interactionCreate', async interaction => {
                               + `- \`/leaderboard <period>\`: Shows the top devotees based on practice scores (weekly or monthly).\n`
                               + `- \`/myscore <period>\`: Shows your personal practice score for a specific period (weekly or monthly).\n`
                               + `- \`/showscore <user>\`: Shows a user's practice scores and streak.\n`
-                              + `- \`/streaklog\`: Shows the current chanting streak leaderboard.\n` // Added /streaklog info
+                              + `- \`/streakboard\`: Shows the current chanting streak leaderboard with pagination.\n` // Updated command name and description
                               + `- \`/streakset <user> <streak>\`: Sets a user's chanting streak (Admin only).\n`
                               + `- \`/checkdata <type> [user] [date_string]\`: Check specific data from the database (Admin only).`);
 
@@ -1845,9 +1904,9 @@ client.on('interactionCreate', async interaction => {
             }
 
         }
-         // --- Handle /streaklog command ---
-        else if (commandName === 'streaklog') {
-            console.log(`[${new Date().toISOString()}] Handling /streaklog command for user ${interaction.user.tag}`);
+         // --- Handle /streakboard command (Renamed from /streaklog) ---
+        else if (commandName === 'streakboard') {
+            console.log(`[${new Date().toISOString()}] Handling /streakboard command for user ${interaction.user.tag}`);
             // Defer the reply immediately
             try {
                 await interaction.deferReply();
@@ -1858,17 +1917,16 @@ client.on('interactionCreate', async interaction => {
             }
             console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
-            // --- Database Interaction for /streaklog ---
+            // --- Database Interaction for /streakboard ---
             let userStreaks;
-            console.log(`[${new Date().toISOString()}] Starting database query for streaklog`);
+            console.log(`[${new Date().toISOString()}] Starting database query for streakboard`);
             try {
                  userStreaks = await UserStreak.findAll({
                     order: [['streakCount', 'DESC']], // Order by streak count descending
-                    limit: 10 // Limit to top 10 for a cleaner display
-                });
-                 console.log(`[${new Date().toISOString()}] Finished database query for streaklog. Found ${userStreaks.length} entries.`);
+                 });
+                 console.log(`[${new Date().toISOString()}] Finished database query for streakboard. Found ${userStreaks.length} entries.`);
             } catch (dbError) {
-                 console.error(`[${new Date().toISOString()}] Database error during findAll for streaklog:`, dbError);
+                 console.error(`[${new Date().toISOString()}] Database error during findAll for streakboard:`, dbError);
                   const embed = new EmbedBuilder()
                       .setColor('#FF0000')
                       .setTitle('Streak Leaderboard Failed')
@@ -1877,43 +1935,78 @@ client.on('interactionCreate', async interaction => {
                   return;
             }
 
-            // Create an embed for the streak leaderboard
-            const embed = new EmbedBuilder()
-                .setColor('#FF6347') // Tomato color
-                .setTitle('Chanting Streak Leaderboard 🔥');
+            const totalPages = Math.ceil(userStreaks.length / ENTRIES_PER_PAGE);
+            const page = 0; // Start on the first page
 
-            if (userStreaks.length === 0) {
-                embed.setDescription("No chanting streaks found yet.");
-            } else {
-                let leaderboardDescription = '';
-                for (let i = 0; i < userStreaks.length; i++) {
-                    const userStreak = userStreaks[i];
-                    let username = 'Unknown User';
-                     try {
-                         if (interaction.guild) {
-                            const member = await interaction.guild.members.fetch(userStreak.userId);
-                             username = member.user.globalName || member.user.username; // Prefer global name
-                         } else {
-                             const user = await client.users.fetch(userStreak.userId);
-                             username = user.globalName || user.username; // Prefer global name
-                         }
-                     } catch (err) {
-                         console.warn(`Could not fetch user/member ${userStreak.userId}:`, err.message);
-                         username = `User ID: ${userStreak.userId}`;
-                     }
+            // Generate and send the initial page
+            const { embeds, components } = await generateStreakboardPage(userStreaks, page, totalPages, interaction);
 
-                    leaderboardDescription += `${i + 1}. **${username}**: ${userStreak.streakCount} day(s) 🙏\n`;
-                }
-                embed.setDescription(leaderboardDescription);
-            }
-
-            console.log(`[${new Date().toISOString()}] Attempting to editReply for /streaklog command`);
+            console.log(`[${new Date().toISOString()}] Attempting to editReply for /streakboard command`);
             try {
-                 await interaction.editReply({ embeds: [embed] });
-                 console.log(`[${new Date().toISOString()}] Successfully edited reply for /streaklog command`);
+                 await interaction.editReply({ embeds: embeds, components: components });
+                 console.log(`[${new Date().toISOString()}] Successfully edited reply for /streakboard command`);
             } catch (editError) {
-                 console.error(`[${new Date().toISOString()}] Error editing reply for /streaklog command:`, editError);
+                 console.error(`[${new Date().toISOString()}] Error editing reply for /streakboard command:`, editError);
             }
+        }
+    }
+
+    // --- Handle Button Interactions ---
+    if (interaction.isButton()) {
+        console.log(`[${new Date().toISOString()}] Button interaction received: ${interaction.customId} for user ${interaction.user.tag}`);
+        // Check if the button custom ID starts with 'streakboard_page_'
+        if (interaction.customId.startsWith('streakboard_page_')) {
+             console.log(`[${new Date().toISOString()}] Handling streakboard pagination button.`);
+            // Defer the button update
+             try {
+                 await interaction.deferUpdate();
+                 console.log(`[${new Date().toISOString()}] Button update deferred successfully.`);
+             } catch (deferError) {
+                 console.error(`[${new Date().toISOString()}] Error deferring button update:`, deferError);
+                 return;
+             }
+             console.log(`[${new Date().toISOString()}] Deferral complete for button interaction. Proceeding with logic.`);
+
+
+            const requestedPage = parseInt(interaction.customId.split('_')[2], 10); // Extract page number from custom ID
+
+            // Re-fetch all streaks (can optimize this by storing in memory if needed)
+            let userStreaks;
+            try {
+                 userStreaks = await UserStreak.findAll({
+                    order: [['streakCount', 'DESC']], // Order by streak count descending
+                 });
+            } catch (dbError) {
+                 console.error(`[${new Date().toISOString()}] Database error during findAll for streakboard pagination:`, dbError);
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000')
+                     .setTitle('Streak Leaderboard Failed')
+                     .setDescription('An error occurred while fetching streak data. Please try again later.');
+                 await interaction.editReply({ embeds: [embed], components: [] }); // Remove buttons on error
+                 return;
+            }
+
+            const totalPages = Math.ceil(userStreaks.length / ENTRIES_PER_PAGE);
+
+            // Validate the requested page number
+            if (isNaN(requestedPage) || requestedPage < 0 || requestedPage >= totalPages) {
+                 console.warn(`[${new Date().toISOString()}] Invalid page requested: ${requestedPage}. Total pages: ${totalPages}`);
+                 // Optionally, send a message indicating invalid page, or just do nothing.
+                 // For now, we'll just log and not update the message.
+                 return;
+            }
+
+            // Generate and update the message with the new page
+            const { embeds, components } = await generateStreakboardPage(userStreaks, requestedPage, totalPages, interaction);
+
+            console.log(`[${new Date().toISOString()}] Attempting to editReply for streakboard pagination.`);
+            try {
+                 await interaction.editReply({ embeds: embeds, components: components });
+                 console.log(`[${new Date().toISOString()}] Successfully edited reply for streakboard pagination.`);
+            } catch (editError) {
+                 console.error(`[${new Date().toISOString()}] Error editing reply for streakboard pagination:`, editError);
+            }
+
         }
     }
 
@@ -2284,7 +2377,7 @@ client.on('interactionCreate', async interaction => {
                     { name: 'Study Hours', value: sadhanaEntry.studyHours.toString(), inline: true },
                     { name: 'Reading', value: sadhanaEntry.readingDetails || 'Not logged' },
                     { name: 'Listening Hours', value: sadhanaEntry.listeningHours.toString(), inline: true },
-                    // Sleeping Time is not in the modal, do NOT display it here.
+                    // Sleeping Time is not in the modal, do NOT display them here.
                     // { name: 'Sleeping Time', value: `${sadhanaEntry.sleepingTime === null ? 'Not Slept' : (sadhanaEntry.sleepingTime ? formatInTimeZone(sadhanaEntry.sleepingTime, IST_TIMEZONE, 'h:mm a') : 'Invalid Time')} (Slept Early < 11 PM IST Previous Night: ${sadhanaEntry.sleptEarlyStatus ? 'Yes' : 'No'})` }, // REMOVED
                     // Regulative Principles are not in the modal, do NOT display them here.
                     // { name: 'Regulative Principles Followed', value: `Meat: ${sadhanaEntry.noMeatEating ? 'Yes' : 'No'}, Gambling: ${sadhanaEntry.noGambling ? 'Yes' : 'No'}, Illicit Sex: ${sadhanaEntry.noIllicitSex ? 'Yes' : 'No'}, Intoxication: ${sadhanaEntry.noIntoxication ? 'Yes' : 'No'}` } // REMOVED
