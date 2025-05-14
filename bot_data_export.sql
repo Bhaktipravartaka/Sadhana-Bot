@@ -49,9 +49,6 @@ INSERT INTO sadhanas VALUES (48, '1218527314049241171', '1314680246863266022', '
 INSERT INTO sadhanas VALUES (49, '1246029462026584105', '1314680246863266022', '2025-05-14 00:00:00+00', 2, 0, 0, '', false, false, NULL, NULL, false, false, false, false, false, false, '', 1, '2025-05-14 18:19:40.287+00');
 
 
---
--- Data for Name: user_streaks; Type: TABLE DATA; Schema: public; Owner: sadhana_das_user
---
 
 INSERT INTO user_streaks VALUES (6, '709077267321716856', 1, '2025-05-07');
 INSERT INTO user_streaks VALUES (4, '1298202885636493314', 2, '2025-05-06');
@@ -71,21 +68,6 @@ INSERT INTO user_streaks VALUES (10, '1318987607522410559', 40, '2025-05-11');
 INSERT INTO user_streaks VALUES (13, '1353285718482489410', 34, '2025-05-11');
 
 
---
--- Name: sadhanas_id_seq; Type: SEQUENCE SET; Schema: public; Owner: sadhana_das_user
---
 
 
-
-
---
--- Name: user_streaks_id_seq; Type: SEQUENCE SET; Schema: public; Owner: sadhana_das_user
---
-
-
-
-
---
--- PostgreSQL database dump complete
---
 
