@@ -1,49 +1,67 @@
 #!/bin/bash
 
+# Define the flag file to indicate import has been done
+IMPORT_FLAG="/opt/render/project/.import_done"
 DB_FILE="database.sqlite"
 SQL_FILE="bot_data_export.sql"
-# A flag file to check if import has already run
-IMPORT_DONE_FLAG=".import_done"
 
-echo "Running startup script..."
+# Check if the import flag exists
+if [ -f "$IMPORT_FLAG" ]; then
+    echo "Import flag found. Skipping data import."
+    # Exit the script, allowing the main 'node index.js' command to run next
+    exit 0
+fi
 
-# Check if the SQLite database file exists (created by the bot on first run)
+echo "Import flag not found. Proceeding with data import."
+
+# Ensure the SQL export file exists
+if [ ! -f "$SQL_FILE" ]; then
+    echo "Error: $SQL_FILE not found. Cannot import data."
+    # Exit with an error code if the SQL file is missing
+    exit 1
+fi
+
+# Run the Node.js app briefly in the background to create the database file and tables
+# We use '&' to run in the background
+echo "Starting Node.js briefly in background to create database file and tables..."
+node index.js &
+
+# Capture the Process ID (PID) of the background Node.js process
+NODE_PID=$!
+
+# Wait for a few seconds to give Node.js/Sequelize time to create the database and tables
+# Adjust the sleep time if needed, but start with 10-15 seconds
+echo "Waiting for 15 seconds for database initialization..."
+sleep 15
+
+# Check if the database file was created
 if [ ! -f "$DB_FILE" ]; then
-  echo "$DB_FILE not found. The bot needs to run once to create it."
-  echo "Please ensure the bot runs at least once with the SQLite config."
-  # Exit or continue, depending on if you want the main app to start anyway
-  # For now, we'll assume the bot will create it on its first real start after deploy
-  # If you stopped after it created the empty DB, this message is just informative.
+    echo "Error: $DB_FILE was not created by the background Node.js process."
+    kill $NODE_PID # Attempt to stop the background process
+    exit 1
 fi
 
-# Check if the import flag file exists
-if [ -f "$IMPORT_DONE_FLAG" ]; then
-  echo "Data import already performed. Skipping import."
+# Now that the database file and tables *should* exist, run the import
+echo "Attempting to import data from $SQL_FILE into $DB_FILE..."
+# Use -batch for non-interactive mode with sqlite3
+if sqlite3 "$DB_FILE" -batch < "$SQL_FILE"; then
+    echo "Data import successful!"
+    # Create the flag file to prevent future imports
+    touch "$IMPORT_FLAG"
 else
-  # Check if the SQL export file exists
-  if [ -f "$SQL_FILE" ]; then
-    echo "Importing data from $SQL_FILE into $DB_FILE..."
-    # Execute the import command
-    sqlite3 "$DB_FILE" < "$SQL_FILE"
-
-    # Check if the import command was successful
-    if [ $? -eq 0 ]; then
-      echo "Data import successful."
-      # Create the flag file so the import doesn't run again
-      touch "$IMPORT_DONE_FLAG"
-      echo "Created import flag file: $IMPORT_DONE_FLAG"
-    else
-      echo "Error during data import!"
-      # Depending on how critical this is, you might want to exit here
-      # exit 1
-    fi
-  else
-    echo "SQL export file ($SQL_FILE) not found in the repository. Skipping import."
-  fi
+    echo "Error during data import!"
+    # Note: If import fails, the flag is NOT created, so it will be attempted again on next deploy.
+    # This is intentional to keep trying until it succeeds.
+    kill $NODE_PID # Attempt to stop the background process
+    exit 1 # Exit with error code
 fi
 
+# Stop the background Node.js process
+echo "Stopping background Node.js process (PID: $NODE_PID)..."
+kill $NODE_PID
+
+# Wait for the background process to actually terminate
+wait $NODE_PID 2>/dev/null
 echo "Startup script finished."
 
-# Now execute the original command to start the Node.js application
-# Render's Start Command might handle this chaining, but explicit is safer
-# If Render's Start Command is just this script, you'll put the node command *after* this script call in Render's config.
+# The script now exits. Render will then execute the primary 'node index.js' command.
