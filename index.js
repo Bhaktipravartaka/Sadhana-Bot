@@ -3,404 +3,289 @@ require('dotenv').config();
 
 const http = require('http'); // Keep for Render health check
 
-// --- Google Sheets API Setup ---
-const { google } = require('googleapis');
-// path is not strictly needed for this Sheets integration, but keep if used elsewhere
-// const path = require('path');
+// --- Database Setup (PostgreSQL with Sequelize) ---
+const { Sequelize, DataTypes, Op } = require('sequelize'); // Import Op for operators like Op.gt
 
-// Load credentials from environment variable
-// IMPORTANT: Ensure GOOGLE_CREDENTIALS_JSON environment variable is set on Render
-let credentials;
-try {
-    credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
-    if (!credentials || !credentials.client_email || !credentials.private_key) {
-         throw new Error('Invalid or missing Google Sheets credentials JSON.');
-    }
-} catch (error) {
-    console.error('FATAL ERROR: Failed to load or parse Google Sheets credentials from environment variable:', error);
-    // Exit the process if credentials cannot be loaded
-    process.exit(1);
+// Get the PostgreSQL connection URI from environment variables
+// IMPORTANT: Ensure POSTGRES_URI environment variable is set on Render (e.g., from Supabase)
+const postgresUri = process.env.POSTGRES_URI;
+
+if (!postgresUri) {
+    console.error('FATAL ERROR: POSTGRES_URI environment variable is not set.');
+    process.exit(1); // Exit if the database connection string is missing
 }
 
+// Create a new Sequelize instance
+const sequelize = new Sequelize(postgresUri, {
+    dialect: 'postgres', // Specify PostgreSQL dialect
+    logging: false, // Set to true to see SQL queries in console (useful for debugging)
+    dialectOptions: {
+        ssl: {
+            require: true, // Require SSL connection
+            rejectUnauthorized: false // This might be needed for some hosting providers like Supabase free tier
+        }
+    }
+});
 
-// Configure the JWT client for authentication
-const jwtClient = new google.auth.JWT(
-    credentials.client_email,
-    null, // No keyFile needed when using privateKey directly
-    credentials.private_key,
-    // Scopes for Google Sheets API access
-    ['https://www.googleapis.com/auth/spreadsheets']
-);
+// Define the Sadhana Model
+// This model is included in case you want to re-implement the full logging later.
+// If you only need streaks, you can remove this model definition and related functions.
+const Sadhana = sequelize.define('Sadhana', { // Model name is 'Sadhana'
+    // Sequelize automatically adds an 'id' primary key column by default
+    userId: {
+        type: DataTypes.STRING, // Use STRING for Discord IDs (they are large numbers)
+        allowNull: false,
+    },
+    guildId: {
+        type: DataTypes.STRING,
+        allowNull: true, // Can be null if the command is used in a DM
+    },
+    date: {
+        type: DataTypes.DATE, // Use DATE for date/time
+        allowNull: false,
+    },
+    japaRounds: {
+        type: DataTypes.INTEGER, // Use INTEGER for numbers
+        defaultValue: 0,
+    },
+    studyHours: {
+        type: DataTypes.FLOAT, // Use FLOAT or DECIMAL for numbers with decimal places
+        defaultValue: 0,
+    },
+    listeningHours: {
+        type: DataTypes.FLOAT,
+        defaultValue: 0,
+    },
+    readingDetails: {
+        type: DataTypes.TEXT, // Use TEXT for potentially longer strings
+        defaultValue: '',
+    },
+    sleepingTime: {
+        type: DataTypes.DATE, // Store as DATE if possible, or STRING if 'Not Slept' is needed
+        allowNull: true, // Allow null
+    },
+    wakingTime: {
+         type: DataTypes.DATE, // Store as DATE if possible, or STRING
+         allowNull: true, // Allow null
+    },
+    wokeUpEarlyStatus: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
+    sleptEarlyStatus: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
+    noMeatEating: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
+    noGambling: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
+    noIllicitSex: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
+    noIntoxication: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
+    additionalService: {
+        type: DataTypes.TEXT,
+        defaultValue: '',
+    },
+    score: {
+        type: DataTypes.FLOAT, // Use FLOAT or DECIMAL for the score
+        defaultValue: 0,
+    },
+    timestamp: {
+        type: DataTypes.DATE,
+        defaultValue: DataTypes.NOW, // Use DataTypes.NOW for current timestamp
+    },
+}, {
+    // Model options
+    tableName: 'sadhanas', // Specify table name
+    timestamps: false, // Sequelize adds createdAt and updatedAt by default, set to false if not needed
+});
 
-// Global variable to hold the authenticated Sheets API instance
-let sheetsAPI = null;
 
-// Authenticate the client and initialize the Sheets API instance
-async function authenticateGoogleSheets() {
+// Define the UserStreak Model
+const UserStreak = sequelize.define('UserStreak', {
+    // Sequelize automatically adds an 'id' primary key column by default
+    userId: {
+        type: DataTypes.STRING, // Discord user IDs are large numbers, store as string
+        unique: true, // Each user should have only one streak entry
+        allowNull: false,
+    },
+    streakCount: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0, // Default streak count is 0
+        allowNull: false,
+    },
+    lastLoggedDateKey: {
+        type: DataTypes.STRING, // Store date as 'YYYY-MM-DD' string
+        allowNull: true, // Can be null if the user hasn't logged yet
+    },
+}, {
+    tableName: 'user_streaks', // Specify table name
+    timestamps: false, // Set to false if not needed
+});
+
+// Function to connect to the database and sync models
+async function connectDB() {
     try {
-        console.log('Attempting to authenticate with Google Sheets API...');
-        const tokens = await jwtClient.authorize();
-        console.log('Successfully authenticated with Google Sheets API.');
-        // Initialize the Sheets API instance after successful authentication
-        sheetsAPI = google.sheets({ version: 'v4', auth: jwtClient });
-        console.log('Google Sheets API instance initialized.');
+        console.log('Attempting to connect to the database...');
+        await sequelize.authenticate();
+        console.log('Database connection has been established successfully.');
 
-        // Now that Sheets API is ready, log in the Discord client
-        console.log('Google Sheets API ready. Logging in Discord client...');
+        // Sync models - This will create tables if they don't exist or update them
+        // Use { alter: true } to make incremental changes to the schema based on model definitions
+        // Be cautious with { force: true } in production as it drops existing tables!
+        await sequelize.sync({ alter: true });
+        console.log('Database models synced successfully.');
+
+        // Now that the database is ready, log in the Discord client
+        console.log('Database ready. Logging in Discord client...');
         client.login(token);
 
-    } catch (err) {
-        console.error('FATAL ERROR: Failed to authenticate with Google Sheets API:', err);
-        // Exit the process if authentication fails
+    } catch (error) {
+        console.error('FATAL ERROR: Unable to connect to the database or sync models:', error);
+        // Exit the process if database connection or sync fails
         process.exit(1);
     }
 }
 
-// You'll also need the Spreadsheet ID you copied earlier
-// Updated with the provided Spreadsheet ID
-const SPREADSHEET_ID = '1FuXi1veR1yL_XZQ4kSFw2Vt9gPsKOIiwzYFTQjD_X-Q';
-
-// --- End Google Sheets API Setup ---
+// --- End Database Setup ---
 
 
-// --- Google Sheets Data Interaction Functions (Streaks Only) ---
-// These functions replace the Sequelize model interactions and focus only on streak data
+// --- Database Data Interaction Functions (Streaks Only) ---
+// These functions use Sequelize to interact with the PostgreSQL database
 
-// Helper function to get the authenticated Sheets API instance
-function getSheetsAPI() {
-    if (!sheetsAPI) {
-        console.error('Google Sheets API client not initialized!');
-        // This should ideally not happen if Discord login waits for authentication,
-        // but adding a check here for safety.
-        throw new Error('Google Sheets API is not ready.');
-    }
-    return sheetsAPI;
-}
-
-// --- User Streak Functions (Interacting with 'user_streaks' sheet) ---
-
-// Function to get a user's streak data from the 'user_streaks' sheet
-// Assumes columns: [userId (A), streakCount (B), lastLoggedDateKey (C)]
+// Helper function to get a user's streak data
 async function getUserStreak(userId) {
-    const sheets = getSheetsAPI();
-    // Define the range for the 'user_streaks' sheet, including headers
-    const range = 'user_streaks!A:C'; // Adjust columns based on your sheet structure
-
     try {
-        const response = await sheets.spreadsheets.values.get({
-            spreadsheetId: SPREADSHEET_ID,
-            range: range,
-        });
-
-        const rows = response.data.values;
-
-        if (!rows || rows.length <= 1) { // Check length <= 1 to account for headers
-            console.log('No data rows found in user_streaks sheet (or only headers).');
-            return null; // Sheet is empty or only has headers
-        }
-
-        // Assuming the first row is headers, skip it and find the row that matches the userId
-        // userId is expected in the first column (index 0)
-        const userRow = rows.slice(1).find(row => row[0] === userId);
-
-        if (userRow) {
-            // Find the original 1-based index of the user's row in the sheet
-            // We need to find the index in the *original* rows array (including headers)
-            const originalRowIndex = rows.findIndex(row => row[0] === userId);
-
-            // Assuming columns are: [userId (0), streakCount (1), lastLoggedDateKey (2)]
-            // Note: Data from sheets comes as strings, convert types as needed
-            return {
-                userId: userRow[0],
-                streakCount: parseInt(userRow[1], 10) || 0, // Convert to number, default to 0 if empty/invalid
-                lastLoggedDateKey: userRow[2],
-                rowIndex: originalRowIndex + 1 // +1 because Sheets rows are 1-indexed
-            };
-        } else {
-            console.log(`User streak not found for userId: ${userId}`);
-            return null; // User not found
-        }
-
+        console.log(`[${new Date().toISOString()}] Fetching streak data for user ${userId} from database.`);
+        const userStreak = await UserStreak.findOne({ where: { userId: userId } });
+        // Convert Sequelize instance to a plain object before returning
+        return userStreak ? userStreak.toJSON() : null;
     } catch (err) {
-        console.error('Error reading from Google Sheet (getUserStreak):', err);
-        throw new Error('Failed to fetch user streak data.'); // Throw a more user-friendly error
+        console.error(`Error fetching user streak for ${userId}:`, err);
+        throw new Error('Failed to fetch user streak data from database.');
     }
 }
 
-// Function to add a new user streak row to the 'user_streaks' sheet
-// Assumes columns: [userId (A), streakCount (B), lastLoggedDateKey (C)]
-async function addUserStreak(userId, streakCount, lastLoggedDateKey) {
-    const sheets = getSheetsAPI();
-    // Append to the 'user_streaks' sheet, specifying the columns to append to
-    const range = 'user_streaks!A:C'; // Adjust columns based on your sheet structure
-
-    // Data to append - must be an array of arrays
-    // Each inner array is a row, values must be in the correct column order (userId, streakCount, lastLoggedDateKey)
-    const values = [
-        [userId, streakCount, lastLoggedDateKey]
-    ];
-
-    const resource = {
-        values,
-    };
-
-    try {
-        const result = await sheets.spreadsheets.values.append({
-            spreadsheetId: SPREADSHEET_ID,
-            range: range,
-            valueInputOption: 'RAW', // How input data is interpreted (RAW means don't parse numbers/dates)
-            insertDataOption: 'INSERT_ROWS', // Insert new rows, shifting existing ones down
-            resource,
-        });
-        console.log(`Appended new streak row for user ${userId}.`);
-        // Return the result of the append operation
-        return result;
-
-    } catch (err) {
-        console.error(`Error adding new streak row for user ${userId}:`, err);
-        throw new Error('Failed to add new user streak data.');
-    }
-}
-
-// Function to update an existing user streak row by its Sheet row index
-// Note: rowIndex is the 1-based index from the Google Sheet
-// Assumes columns: [userId (A), streakCount (B), lastLoggedDateKey (C)]
-// We update columns B and C for streakCount and lastLoggedDateKey
-async function updateExistingUserStreak(rowIndex, streakCount, lastLoggedDateKey) {
-    const sheets = getSheetsAPI();
-    // Define the range for the update - target the specific row and columns B and C
-    // Adjust 'B' and 'C' based on your sheet structure
-    const range = `user_streaks!B${rowIndex}:C${rowIndex}`;
-
-    // Data to update - must be an array of arrays, matching the target range columns
-    // Order: [streakCount, lastLoggedDateKey]
-    const values = [
-        [streakCount, lastLoggedDateKey]
-    ];
-
-    const resource = {
-        values,
-    };
-
-    try {
-        const result = await sheets.spreadsheets.values.update({
-            spreadsheetId: SPREADSHEET_ID,
-            range: range,
-            valueInputOption: 'RAW', // How input data is interpreted
-            resource,
-        });
-        console.log(`Updated streak row ${rowIndex} for user.`);
-        // Return the result of the update operation
-        return result;
-
-    } catch (err) {
-        console.error(`Error updating streak row ${rowIndex}:`, err);
-        throw new Error('Failed to update user streak data.');
-    }
-}
-
-// Helper function to find, create, or update a user's streak
-// updateLogicFn is a function that takes the current streak data (or null) and returns { newStreakCount, newLastLoggedDateKey }
+// Helper function to find or create and update a user's streak
+// updateLogicFn is a function that takes the current streak data (as a plain object or null)
+// and returns { newStreakCount, newLastLoggedDateKey }.
 async function findOrCreateAndUpdateUserStreak(userId, updateLogicFn) {
-    let userStreakData = await getUserStreak(userId);
-
-    // Calculate the new streak details using the provided logic function
-    const { newStreakCount, newLastLoggedDateKey } = updateLogicFn(userStreakData);
-
-    if (userStreakData) {
-        // User exists, update the row using the stored rowIndex
-        await updateExistingUserStreak(userStreakData.rowIndex, newStreakCount, newLastLoggedDateKey);
-        // Return the updated data structure (simulate the updated state)
-        return { ...userStreakData, streakCount: newStreakCount, lastLoggedDateKey: newLastLoggedDateKey };
-    } else {
-        // User does not exist, add a new row
-        await addUserStreak(userId, newStreakCount, newLastLoggedDateKey);
-        // Return the data structure for the newly created entry (simulate the created state)
-        return { userId, streakCount: newStreakCount, lastLoggedDateKey: newLastLoggedDateKey, rowIndex: null }; // rowIndex is unknown after append
-    }
-}
-
-// Function to get all user streaks for the streakboard
-// Assumes columns: [userId (A), streakCount (B), lastLoggedDateKey (C)]
-async function getAllUserStreaks() {
-    const sheets = getSheetsAPI();
-    const range = 'user_streaks!A:C'; // Adjust columns based on your sheet structure
-
-    try {
-        const response = await sheets.spreadsheets.values.get({
-            spreadsheetId: SPREADSHEET_ID,
-            range: range,
-        });
-
-        const rows = response.data.values;
-
-        if (!rows || rows.length <= 1) { // Check length <= 1 to account for headers
-            console.log('No data rows found in user_streaks sheet (or only headers).');
-            return []; // Return empty array if no data
-        }
-
-        // Map rows (skipping headers) to objects
-        // Assumes columns: [userId (0), streakCount (1), lastLoggedDateKey (2)]
-        const streaks = rows.slice(1).map(row => ({
-            userId: row[0],
-            streakCount: parseInt(row[1], 10) || 0, // Convert to number
-            lastLoggedDateKey: row[2],
-             // rowIndex is not needed for this function
-        }));
-
-        // Sort by streakCount descending
-        streaks.sort((a, b) => b.streakCount - a.streakCount);
-
-        return streaks;
-
-    } catch (err) {
-        console.error('Error reading from Google Sheet (getAllUserStreaks):', err);
-        throw new Error('Failed to fetch all user streak data.');
-    }
-}
-
-// Function to get the total count of user streak entries
-async function getTotalUserStreakCount() {
-     const sheets = getSheetsAPI();
-     const range = 'user_streaks!A:A'; // Read only the first column to count rows
-
      try {
-         const response = await sheets.spreadsheets.values.get({
-             spreadsheetId: SPREADSHEET_ID,
-             range: range,
+         // Find or create the user streak entry
+         const [userStreakInstance, created] = await UserStreak.findOrCreate({
+             where: { userId: userId },
+             defaults: {
+                 streakCount: 0,
+                 lastLoggedDateKey: null,
+             },
          });
 
-         const rows = response.data.values;
+        // Get the current data as a plain object to pass to the update logic
+        const currentUserStreakData = created ? null : userStreakInstance.toJSON();
 
-         // If rows exist, the count is rows.length - 1 (subtract header row)
-         // If no rows or only header, count is 0
-         const count = (rows && rows.length > 0) ? rows.length - 1 : 0;
+        // Calculate the new streak details using the provided logic function
+        const { newStreakCount, newLastLoggedDateKey } = updateLogicFn(currentUserStreakData);
 
-         console.log(`Total user streak entries counted: ${count}`);
+        // Update the instance properties
+        userStreakInstance.streakCount = newStreakCount;
+        userStreakInstance.lastLoggedDateKey = newLastLoggedDateKey;
+
+        // Save the changes to the database
+        await userStreakInstance.save();
+
+        // Invalidate the cache after writing
+        invalidateStreakCache();
+        console.log(`[${new Date().toISOString()}] Streak cache invalidated after updating user ${userId}.`);
+
+
+         console.log(`User streak ${created ? 'created' : 'updated'} for user ${userId}.`);
+
+         // Return the updated data as a plain object
+         return userStreakInstance.toJSON();
+
+     } catch (err) {
+         console.error(`Error finding/creating/updating user streak for ${userId}:`, err);
+         throw new Error('Failed to update user streak data.');
+     }
+}
+
+
+// Function to get all user streaks for the streakboard, using caching
+async function getAllUserStreaks() {
+    const now = new Date();
+    // Check if cached data exists and is still valid
+    if (cachedStreaks && lastCacheTime && (now.getTime() - lastCacheTime.getTime() < CACHE_DURATION_MS)) {
+        console.log(`[${new Date().toISOString()}] Using cached streak data for getAllUserStreaks.`);
+        return cachedStreaks;
+    }
+
+    console.log(`[${new Date().toISOString()}] Cache expired or empty for getAllUserStreaks. Fetching fresh streak data from database.`);
+    try {
+        // Fetch all user streaks, ordered by streakCount descending
+        const streaks = await UserStreak.findAll({
+            order: [['streakCount', 'DESC']],
+        });
+
+        // Convert Sequelize instances to plain objects for caching and processing
+        const plainStreaks = streaks.map(streak => streak.toJSON());
+
+        // Update the cache
+        cachedStreaks = plainStreaks;
+        lastCacheTime = new Date();
+        console.log(`[${new Date().toISOString()}] Streak cache updated.`);
+
+        return plainStreaks;
+
+    } catch (err) {
+        console.error('Error fetching all user streaks:', err);
+        throw new Error('Failed to fetch all user streak data from database.');
+    }
+}
+
+// Function to get the total count of user streak entries, using caching
+// This function can use the cachedStreaks array length if available
+async function getTotalUserStreakCount() {
+    // If the full streak list is cached, we can just use its length
+    if (cachedStreaks !== null && cachedStreaks !== undefined) {
+         console.log(`[${new Date().toISOString()}] Using cached data length for getTotalUserStreakCount.`);
+         return cachedStreaks.length;
+    }
+
+    // If cache is not available, fetch directly from the database
+     console.log(`[${new Date().toISOString()}] Cache not available for getTotalUserStreakCount. Fetching directly from database.`);
+     try {
+         const count = await UserStreak.count();
+         console.log(`Total user streak entries counted: ${count} (fetched directly).`);
          return count;
-
      } catch (err) {
          console.error('Error counting user streak entries:', err);
          throw new Error('Failed to count user streak entries.');
      }
 }
 
-
-// --- REMOVED Sadhana Log Functions ---
-// Function to get a user's sadhana log for a specific date (REMOVED)
-// async function getSadhanaLog(userId, date) {...} // REMOVED
-// Function to add a new sadhana log row (REMOVED)
-// async function addSadhanaLog(logData) {...} // REMOVED
-// Function to update an existing sadhana log row (REMOVED)
-// async function updateExistingSadhanaLog(rowIndex, logData) {...} // REMOVED
-// Helper function to find, create, or update a sadhana log entry (REMOVED)
-// async function findOrCreateAndUpdateSadhanaLog(logData) {...} // REMOVED
-// Function to get sadhana logs within a date range for a specific user (REMOVED)
-// async function getSadhanaLogsInPeriodForUser(userId, startDate, endDate) {...} // REMOVED
-// Function to get all sadhana logs for a specific user (REMOVED)
-// async function getAllTimeSadhanaLogsForUser(userId) {...} // REMOVED
-// Function to get aggregate data for leaderboard (REMOVED)
-// async function getLeaderboardData(startDate, endDate) {...} // REMOVED
-// Function to get the total count of sadhana entries (REMOVED)
-// async function getTotalSadhanaCount() {...} // REMOVED
-
-
-// --- End Google Sheets Data Interaction Functions ---
-
-
-// Import necessary classes from discord.js
-// Added ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle
-const { Client, GatewayIntentBits, REST, Routes, PermissionsBitField, MessageFlags, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-
-// Using date-fns for robust date/time parsing and comparison
-// Make sure 'date-fns' is installed: npm install date-fns
-const { parse, differenceInCalendarDays, addDays, format, startOfDay, endOfDay, startOfMonth, setHours, setMinutes, setSeconds, isBefore, differenceInMilliseconds } = require('date-fns');
-
-// For timezone handling - Needed for accurate IST time comparisons
-// IMPORTANT: Make sure 'date-fns-tz' (v2 or later) is installed: npm install date-fns-tz
-const { toZonedTime, fromZonedTime, formatInTimeZone } = require('date-fns-tz');
-
-// --- REMOVED Sequelize and DataTypes ---
-// const { Sequelize, DataTypes } = require('sequelize'); // REMOVED
-
-// Import node-cron for scheduling tasks
-// Make sure 'node-cron' is installed: npm install node-cron
-const cron = require('node-cron');
-
-
-// Get bot token, client ID, guild ID, and SQLite URI from environment variables.
-const token = process.env.DISCORD_TOKEN;
-const clientId = process.env.CLIENT_ID;
-const guildId = process.env.GUILD_ID; // Your server's ID (Guild ID) for faster testing
-// --- REMOVED SQLite DB Path ---
-// const SQLITE_DB_PATH = 'database.sqlite'; // REMOVED
-// --- REMOVED Postgres URI ---
-// const postgresUri = process.env.POSTGRES_URI; // REMOVED
-const announcementChannelId = process.env.ANNOUNCEMENT_CHANNEL_ID; // Add this to your .env file
-
-// Define the timezone for IST
-const IST_TIMEZONE = 'Asia/Kolkata'; // IANA timezone name for India Standard Time
-
-// Define the daily cutoff time for logging practice (e.g., 11:59 PM IST)
-const DAILY_CUTOFF_HOUR_IST = 23; // 23 for 11 PM
-const DAILY_CUTOFF_MINUTE_IST = 59; // 59 for 59 minutes
-
-// Define how many entries per page for the streakboard
-const ENTRIES_PER_PAGE = 10;
-
-
-// --- REMOVED Database Connection using Sequelize ---
-// const sequelize = new Sequelize({...}); // REMOVED
-// async function connectDB() {...} // REMOVED
-// connectDB(); // REMOVED
-
-// --- REMOVED Sequelize Model Definitions ---
-// const Sadhana = sequelize.define('Sadhana', {...}); // REMOVED
-// const UserStreak = sequelize.define('UserStreak', {...}); // REMOVED
-
-
-// Helper function to parse time string with date context and convert to IST
-// This function remains the same as it works with standard Date objects
-// Although not used for Sadhana logs anymore, keeping it in case it's needed elsewhere
-function parseTimeInIST(dateKey, timeString) {
-    try {
-        // Ensure dateKey is a Date object or a string parseable as a date
-        const baseDate = typeof dateKey === 'string' ? parse(dateKey, 'yyyy-MM-dd', new Date()) : dateKey;
-        if (isNaN(baseDate.getTime())) {
-             console.error(`parseTimeInIST: Invalid base date provided: "${dateKey}"`);
-             return null;
-        }
-
-        const dateTimeString = `${format(baseDate, 'yyyy-MM-dd')} ${timeString}`;
-        // Use fromZonedTime with the base date's start of day in the target timezone for context
-        const parsedDate = parse(dateTimeString, 'yyyy-MM-dd h:mm a', startOfDay(toZonedTime(baseDate, IST_TIMEZONE)));
-
-
-         if (isNaN(parsedDate.getTime())) {
-             console.error(`parseTimeInIST: Parsed date is invalid for string: "${dateTimeString}"`);
-             return null;
-        }
-
-        // Convert the parsed date/time (which is in the context of IST) to a UTC Date object
-        const utcDate = fromZonedTime(parsedDate, IST_TIMEZONE);
-
-        return utcDate;
-
-    } catch (error) {
-        console.error(`parseTimeInIST: Error parsing time string "${timeString}" for date "${dateKey}":`, error);
-        // Don't re-throw here, return null or handle gracefully in caller
-        return null;
-    }
+// Helper function to invalidate the streak cache
+function invalidateStreakCache() {
+    cachedStreaks = null;
+    lastCacheTime = null;
+    console.log(`[${new Date().toISOString()}] Streak cache explicitly invalidated.`);
 }
 
-
-// Function to calculate the score (logic remains the same, operates on log object)
-// This function is no longer used as Sadhana logs are removed, but keeping it for reference
-// in case you re-introduce Sadhana logging later.
+// Helper function to calculate the score (logic remains the same, operates on log object)
+// This function is used by the /showscore command to calculate scores from Sadhana entries.
 function calculateScore(log) {
     let score = 0;
 
-    // Access data using object properties (matching the keys returned by Sheets functions)
+    // Access data using object properties (matching the keys from Sadhana model)
     if ((log.japaRounds || 0) > 0) {
         score += 1;
     }
@@ -431,6 +316,43 @@ function calculateScore(log) {
 }
 
 
+// --- End Database Data Interaction Functions ---
+
+
+// Import necessary classes from discord.js
+const { Client, GatewayIntentBits, REST, Routes, PermissionsBitField, MessageFlags, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+
+// Using date-fns for robust date/time parsing and comparison
+// Make sure 'date-fns' is installed: npm install date-fns
+const { parse, differenceInCalendarDays, addDays, format, startOfDay, endOfDay, startOfMonth, setHours, setMinutes, setSeconds, isBefore, differenceInMilliseconds } = require('date-fns');
+
+// For timezone handling - Needed for accurate IST time comparisons
+// IMPORTANT: Make sure 'date-fns-tz' (v2 or later) is installed: npm install date-fns-tz
+const { toZonedTime, fromZonedTime, formatInTimeZone } = require('date-fns-tz');
+
+// Import node-cron for scheduling tasks
+// Make sure 'node-cron' is installed: npm install node-cron
+const cron = require('node-cron');
+
+
+// Get bot token, client ID, guild ID, and other IDs from environment variables.
+const token = process.env.DISCORD_TOKEN;
+const clientId = process.env.CLIENT_ID;
+const guildId = process.env.GUILD_ID; // Your server's ID (Guild ID) for faster testing
+const announcementChannelId = process.env.ANNOUNCEMENT_CHANNEL_ID; // Add this to your .env file
+
+
+// Define the timezone for IST
+const IST_TIMEZONE = 'Asia/Kolkata'; // IANA timezone name for India Standard Time
+
+// Define the daily cutoff time for logging practice (e.g., 11:59 PM IST)
+const DAILY_CUTOFF_HOUR_IST = 23; // 23 for 11 PM
+const DAILY_CUTOFF_MINUTE_IST = 59; // 59 for 59 minutes
+
+// Define how many entries per page for the streakboard
+const ENTRIES_PER_PAGE = 10;
+
+
 // Create a new Discord client instance.
 const client = new Client({
     intents: [
@@ -443,7 +365,7 @@ const client = new Client({
 
 
 // --- Define Slash Commands ---
-// Removed /logpractice, weeklysummary, monthlysummary, leaderboard, myscore commands
+// Commands definition remains the same, only the implementation changes
 const commands = [
      {
         name: 'chant',
@@ -457,54 +379,14 @@ const commands = [
             },
         ],
     },
-    // Removed /logpractice command
-    // { name: 'logpractice', description: 'Log your daily spiritual practices using a form.' },
-    // Removed weeklysummary command
-    // { name: 'weeklysummary', description: 'Shows your spiritual practice summary for the last 7 days.' },
-    // Removed monthlysummary command
-    // { name: 'monthlysummary', description: 'Shows your spiritual practice summary for the current month.' },
-    // Removed leaderboard command
-    // {
-    //     name: 'leaderboard',
-    //     description: 'Shows the top devotees based on practice scores.',
-    //     options: [
-    //         {
-    //             name: 'period',
-    //             type: 3, // STRING
-    //             description: 'Select the period for the leaderboard',
-    //             required: true,
-    //             choices: [
-    //                 { name: 'Weekly', value: 'weekly' },
-    //                 { name: 'Monthly', value: 'monthly' },
-    //             ],
-    //         },
-    //     ],
-    // },
-    // Removed myscore command
-    // {
-    //     name: 'myscore',
-    //     description: 'Shows your personal practice score for a specific period.',
-    //     options: [
-    //         {
-    //             name: 'period',
-    //             type: 3, // STRING
-    //             description: 'Select the period for your score',
-    //             required: true,
-    //             choices: [
-    //                 { name: 'Weekly', value: 'weekly' },
-    //                 { name: 'Monthly', value: 'monthly'},
-    //             ],
-    //         },
-    //     ],
-    // },
     {
         name: 'showscore',
-        description: 'Shows a user\'s chanting streak.', // Updated description
+        description: 'Shows a user\'s chanting streak and practice scores.', // Updated description
         options: [
             {
                 name: 'user',
                 type: 6, // USER
-                description: 'The user whose streak to show.', // Updated description
+                description: 'The user whose data to show.', // Updated description
                 required: true,
             },
         ],
@@ -534,7 +416,7 @@ const commands = [
     },
     {
         name: 'checkdata',
-        description: 'Check specific data from the Google Sheet (Admin only).', // Updated description
+        description: 'Check specific data from the database (Admin only).', // Updated description
         options: [
             {
                 name: 'type',
@@ -542,25 +424,23 @@ const commands = [
                 description: 'Type of data to check',
                 required: true,
                 choices: [
-                    // Removed Sadhana log options
-                    // { name: 'User Log by Date', value: 'user_log_by_date' },
                     { name: 'User Streak', value: 'user_streak' },
-                    // Removed Total Sadhana entries count
-                    // { name: 'Total Sadhana Entries Count', value: 'total_sadhana_count' },
                     { name: 'Total User Streak Entries Count', value: 'total_streak_count' },
+                    { name: 'User Sadhana Log by Date', value: 'user_sadhana_log_by_date' }, // Added back Sadhana check
                 ],
             },
             {
                 name: 'user',
                 type: 6, // USER
-                description: 'The user to check data for (required for User Streak).', // Updated description
+                description: 'The user to check data for (required for User Streak and Sadhana Log).', // Updated description
                 required: false,
             },
-            // Removed date-related options as they were for Sadhana logs
-            // { name: 'date_string', type: 3, description: 'Date of the log (e.g., 07/05/2025) (required for User Log by Date).', required: false },
-            // { name: 'day', type: 4, description: 'Day of the month (optional, use date_string instead).', required: false },
-            // { name: 'month', type: 4, description: 'Month (1-12) (optional, use date_string instead).', required: false },
-            // { name: 'year', type: 4, description: 'Year (e.g., 2023) (optional, use date_string instead).', required: false },
+             {
+                name: 'date_string',
+                type: 3, // STRING
+                description: 'Date for Sadhana Log (YYYY-MM-DD format, required for User Sadhana Log).',
+                required: false,
+            },
         ],
         default_member_permissions: PermissionsBitField.Flags.Administrator.toString(),
     },
@@ -569,6 +449,7 @@ const commands = [
         description: 'Shows the current chanting streak leaderboard.',
     },
 ];
+
 
 const rest = new REST({ version: '10' }).setToken(token);
 
@@ -584,10 +465,6 @@ const rest = new REST({ version: '10' }).setToken(token);
         console.error('Error registering commands:', error);
     }
 })();
-
-
-// --- REMOVED Define the Log Practice Modal ---
-// const logPracticeModal = new ModalBuilder() {...} // REMOVED
 
 
 // --- Helper function to generate a streakboard page embed and components ---
@@ -625,6 +502,7 @@ async function generateStreakboardPage(streaks, page, totalPages, interaction) {
                  username = `User ID: ${userStreak.userId}`; // Fallback to user ID if fetch fails
              }
 
+            // Access data using object properties from Sequelize model output
             leaderboardDescription += `${globalRank}. **${username}**: ${userStreak.streakCount} day(s) 🙏\n`;
         }
         embed.setDescription(leaderboardDescription);
@@ -658,13 +536,13 @@ client.once('ready', () => {
     // --- Schedule Cron Jobs ---
 
     // Schedule daily streak warning DM (e.g., at 10:00 PM IST)
-    // This cron job now only checks streak data
+    // Cron format: minute hour day-of-month month day-of-week
+    // Example: '0 22 * * *' runs at 22:00 (10:00 PM) every day
     cron.schedule('0 22 * * *', async () => {
         console.log(`[${new Date().toISOString()}] Running daily streak warning job.`);
         try {
             const now = new Date();
             const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE));
-            const todayKey = format(todayIST, 'yyyy-MM-dd');
 
             // Calculate the cutoff time for today in IST
             let cutoffTimeTodayIST = setHours(setMinutes(setSeconds(todayIST, 0), DAILY_CUTOFF_MINUTE_IST), DAILY_CUTOFF_HOUR_IST);
@@ -672,22 +550,32 @@ client.once('ready', () => {
              // However, for the warning, we want to warn *before* today's cutoff.
              // So, we just need today's cutoff time.
 
-            // --- Sheets Interaction: Fetch all users with a streak > 0 ---
-            // We need to fetch all streaks to find users with streaks > 0
-            const allUserStreaks = await getAllUserStreaks();
-            const usersWithStreaks = allUserStreaks.filter(streak => streak.streakCount > 0);
+            // Fetch all users with a streak > 0
+            const usersWithStreaks = await UserStreak.findAll({
+                where: {
+                    streakCount: { [Op.gt]: 0 } // Use Op.gt for > operator
+                }
+            });
 
             console.log(`[${new Date().toISOString()}] Found ${usersWithStreaks.length} users with streaks.`);
 
             for (const userStreak of usersWithStreaks) {
                 const userId = userStreak.userId;
-                const lastLoggedDateKey = userStreak.lastLoggedDateKey;
 
-                // Check if the last logged date is NOT today
-                const lastLoggedDate = lastLoggedDateKey ? startOfDay(parse(lastLoggedDateKey, 'yyyy-MM-dd', new Date())) : null;
+                // Check if the user has logged practice for today by looking for a Sadhana entry
+                const todayLog = await Sadhana.findOne({
+                    where: {
+                        userId: userId,
+                         // Check for logs within the IST day
+                        date: {
+                            [Op.gte]: startOfDay(toZonedTime(now, IST_TIMEZONE)), // Greater than or equal to the start of today IST
+                            [Op.lte]: endOfDay(toZonedTime(now, IST_TIMEZONE))   // Less than or equal to the end of today IST
+                        }
+                    }
+                });
 
-                // Send warning if last logged date is before today (meaning they haven't logged today yet)
-                if (!lastLoggedDate || isBefore(lastLoggedDate, todayIST)) {
+                // If no log for today, send a warning DM
+                if (!todayLog) {
                     try {
                         const user = await client.users.fetch(userId);
                         if (user) {
@@ -699,7 +587,7 @@ client.once('ready', () => {
                                 const hours = Math.floor(timeRemainingMs / (1000 * 60 * 60));
                                 const minutes = Math.floor((timeRemainingMs % (1000 * 60 * 60)) / (1000 * 60));
 
-                                const warningMessage = `Hare Krishna! 🙏 Your chanting streak of ${userStreak.streakCount} day(s) is about to be lost! You haven't logged your chanting for today yet.`; // Updated message
+                                const warningMessage = `Hare Krishna! 🙏 Your chanting streak of ${userStreak.streakCount} day(s) is about to be lost! You haven't logged your practice for today yet.`;
                                 const timeRemainingMessage = `You have about ${hours} hours and ${minutes} minutes remaining to log your rounds using \`/chant <rounds>\`. Don't miss your streak!`; // Updated message
 
                                 const embed = new EmbedBuilder()
@@ -733,7 +621,7 @@ client.once('ready', () => {
     });
 
     // Schedule daily announcement message (e.g., at 8:00 AM IST)
-    // Updated message to reflect available commands
+    // Example: '0 8 * * *' runs at 8:00 AM every day
     cron.schedule('0 8 * * *', async () => {
         console.log(`[${new Date().toISOString()}] Running daily announcement job.`);
         if (!announcementChannelId) {
@@ -746,8 +634,8 @@ client.once('ready', () => {
             if (channel && channel.isTextBased()) {
                 const embed = new EmbedBuilder()
                     .setColor('#0099FF') // Blue color
-                    .setTitle('Daily Chanting Reminder!') // Updated title
-                    .setDescription(`Hare Krishna! 🙏 Remember to log your japa rounds for today using \`/chant <rounds>\` to keep your streak alive!`); // Updated description
+                    .setTitle('Daily Chanting Reminder!')
+                    .setDescription(`Hare Krishna! 🙏 Remember to log your japa rounds for today using \`/chant <rounds>\` to keep your streak alive!`); // Updated message
 
                 // Use channel.send to send the message
                 // To mention everyone, you would add allowedMentions and content: '@everyone'
@@ -772,14 +660,11 @@ client.once('ready', () => {
         timezone: IST_TIMEZONE // Ensure the cron job runs based on IST
     });
 
-    // --- REMOVED Call to connectDB() ---
-    // connectDB(); // REMOVED
-
 });
 
-// Start the Google Sheets authentication process
-// Discord client login is moved inside the authentication success callback
-authenticateGoogleSheets();
+// Start the database connection and sync models
+// Discord client login is moved inside the database connection success callback
+connectDB();
 
 
 client.on('interactionCreate', async interaction => {
@@ -804,11 +689,9 @@ client.on('interactionCreate', async interaction => {
 
             const rounds = interaction.options.getInteger('rounds');
             const userId = interaction.user.id;
-            // guildId is not used in streak logic, but kept for potential future use
-            // const guildId = interaction.guild?.id;
+            const guildId = interaction.guild?.id; // Get guildId if available
             const now = new Date();
             const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE)); // Get start of today in IST
-            const todayKey = format(todayIST, 'yyyy-MM-dd');
 
             if (rounds < 0) {
                  const embed = new EmbedBuilder()
@@ -819,10 +702,84 @@ client.on('interactionCreate', async interaction => {
                  return;
             }
 
+            // --- Database Interaction for /chant (Sadhana Log part) ---
+            // This part logs the japa rounds in the Sadhana table.
+            let sadhanaEntry;
+            let sadhanaCreated;
+            console.log(`[${new Date().toISOString()}] Starting database findOrCreate for Sadhana log (/chant) for user ${userId} on ${format(todayIST, 'yyyy-MM-dd')}`);
             try {
-                // --- Sheets Interaction: Chanting Streak Logic for /chant ---
-                 // Find or create and update the user's streak entry
-                 const userStreak = await findOrCreateAndUpdateUserStreak(userId, (currentUserStreak) => {
+                 // Find or create a Sadhana entry for today for this user
+                 [sadhanaEntry, sadhanaCreated] = await Sadhana.findOrCreate({
+                    where: {
+                        userId: userId,
+                         // Find entries within the IST day for today
+                        date: {
+                             [Op.gte]: startOfDay(toZonedTime(now, IST_TIMEZONE)), // Greater than or equal to the start of today IST
+                             [Op.lte]: endOfDay(toZonedTime(now, IST_TIMEZONE))   // Less than or equal to the end of today IST
+                        }
+                    },
+                    defaults: {
+                        userId: userId,
+                        guildId: guildId,
+                        date: todayIST, // Store the start of the day in IST as the date
+                        japaRounds: rounds,
+                         // Set other fields to default values as they are not provided by /chant
+                        studyHours: 0,
+                        listeningHours: 0,
+                        readingDetails: '',
+                        wakingTime: null,
+                        wokeUpEarlyStatus: false,
+                        sleepingTime: null,
+                        sleptEarlyStatus: false,
+                        noMeatEating: false,
+                        noGambling: false,
+                        noIllicitSex: false,
+                        noIntoxication: false,
+                        additionalService: '',
+                        score: 0, // Calculate score after updating
+                    }
+                });
+                 console.log(`[${new Date().toISOString()}] Finished database findOrCreate for Sadhana log (/chant). Created: ${sadhanaCreated}`);
+            } catch (dbError) {
+                console.error(`Database error during findOrCreate for Sadhana log (/chant):`, dbError);
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000')
+                     .setTitle('Chanting Log Failed')
+                     .setDescription('An error occurred while accessing the Sadhana database. Please try again later.');
+                 await interaction.editReply({ embeds: [embed] });
+                 return;
+            }
+
+            // If updating an existing Sadhana entry, add the new rounds to existing rounds
+            if (!sadhanaCreated) {
+                 // Ensure sadhanaEntry.japaRounds is a number before adding
+                 sadhanaEntry.japaRounds = (sadhanaEntry.japaRounds || 0) + rounds;
+            }
+
+            // Recalculate and save the score for the Sadhana entry
+            sadhanaEntry.score = calculateScore(sadhanaEntry.toJSON()); // Pass plain object to calculateScore
+
+            console.log(`[${new Date().toISOString()}] Starting database save for Sadhana log (/chant) for user ${userId} on ${format(todayIST, 'yyyy-MM-dd')}`);
+            try {
+                await sadhanaEntry.save();
+                 console.log(`[${new Date().toISOString()}] Finished database save for Sadhana log (/chant).`);
+            } catch (dbError) {
+                console.error(`Database error during save for Sadhana log (/chant):`, dbError);
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000')
+                     .setTitle('Chanting Log Failed')
+                     .setDescription('An error occurred while saving Sadhana data to the database. Please try again later.');
+                 await interaction.editReply({ embeds: [embed] });
+                 return;
+            }
+
+
+            // --- Chanting Streak Logic for /chant ---
+             // Find or create the user's streak entry in the UserStreak table
+            let userStreak;
+            console.log(`[${new Date().toISOString()}] Starting database findOrCreateAndUpdateUserStreak for streak (/chant) for user ${userId}`);
+            try {
+                 userStreak = await findOrCreateAndUpdateUserStreak(userId, (currentUserStreak) => {
                      let currentStreak = currentUserStreak ? currentUserStreak.streakCount : 0;
                      const lastLoggedDateKey = currentUserStreak ? currentUserStreak.lastLoggedDateKey : null;
                      let newStreak = currentStreak;
@@ -837,22 +794,29 @@ client.on('interactionCreate', async interaction => {
                                  newStreak = currentStreak + 1;
                              } else if (dayDifference > 1) {
                                  newStreak = 1; // Reset streak
-                             } else if (dayDifference <= 0 && format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
-                                 newStreak = currentStreak; // Already logged today
+                             } else if (dayDifference === 0 && format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
+                                 // This case might occur if the date was manually set backward,
+                                 // but with /chant always using todayIST, this specific check might be redundant.
+                                 // Keeping it for robustness.
+                                 newStreak = currentStreak;
                              }
+                             // If dayDifference is 0 and it's the same day, keep the streak
+                             // This case is implicitly handled as newStreak is initialized to currentStreak
                          } else {
                              newStreak = 1; // First log ever
                          }
 
-                         // Only update streak count and last logged date if the current log date is after the last logged date
-                         // This prevents logging multiple times on the same day from increasing the streak
-                         if (!lastLoggedDateKey || (todayIST > lastLoggedDate)) {
-                             return { newStreakCount: newStreak, newLastLoggedDateKey: format(todayIST, 'yyyy-MM-dd') };
-                         } else {
-                              // If logging for a date <= last logged date, keep the current streak and date
-                             return { newStreakCount: currentStreak, newLastLoggedDateKey: lastLoggedDateKey };
+                         // Determine the new last logged date key
+                         let newLastLoggedDateKey = lastLoggedDateKey;
+                         // Only update the last logged date key if the current log date is today
+                         // This ensures the streak is based on consecutive *days logged*, not just any log date.
+                         if (format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
+                              newLastLoggedDateKey = format(todayIST, 'yyyy-MM-dd');
                          }
 
+
+                         // Return the calculated new streak count and date key
+                         return { newStreakCount: newStreak, newLastLoggedDateKey: newLastLoggedDateKey };
                      } else {
                           console.error(`Invalid todayIST date for streak logic (/chant): ${todayIST}`);
                           // In case of invalid date, return current streak details to avoid data loss
@@ -860,50 +824,39 @@ client.on('interactionCreate', async interaction => {
                      }
                  });
 
+                 console.log(`[${new Date().toISOString()}] Finished database findOrCreateAndUpdateUserStreak for streak (/chant).`);
 
-                // --- Create an embed response message for /chant ---
-                const embed = new EmbedBuilder()
-                    .setColor('#00FF00') // Green color
-                    .setTitle('Japa Rounds Logged!')
-                    .setDescription(`You logged **${rounds}** rounds for today (${format(todayIST, 'dd/MM/yyyy')}).`) // Use 'rounds' directly
-                    .addFields(
-                         // Removed score field as Sadhana logs are removed
-                         // { name: 'Score for today (so far)', value: sadhanaEntry.score.toString(), inline: true },
-                         { name: 'Current Chanting Streak', value: `${userStreak.streakCount} day(s) 🙏`, inline: true }
-                    );
+            } catch (dbError) {
+                 console.error(`Database error during findOrCreateAndUpdateUserStreak for streak (/chant):`, dbError);
+                  const embed = new EmbedBuilder()
+                      .setColor('#FF0000')
+                      .setTitle('Chanting Log Failed')
+                      .setDescription('An error occurred while updating streak data. Please try again later.');
+                  await interaction.editReply({ embeds: [embed] });
+                  return;
+            }
 
-                console.log(`[${new Date().toISOString()}] Sheets update complete. Attempting to send embed reply for user ${userId}`);
-                try {
-                     await interaction.editReply({ embeds: [embed] });
-                     console.log(`[${new Date().toISOString()}] Successfully sent embed reply for /chant command for user ${userId}`);
-                } catch (editError) {
-                     console.error(`[${new Date().toISOString()}] Error editing reply with embed for /chant command for user ${userId}:`, editError);
-                }
 
-            } catch (error) {
-                console.error(`[${new Date().toISOString()}] Error during /chant command for user ${userId}:`, error);
-                 const embed = new EmbedBuilder()
-                     .setColor('#FF0000')
-                     .setTitle('Chanting Log Failed')
-                     .setDescription(`An error occurred while logging your rounds: ${error.message}`);
-                 // Ensure we editReply since we deferred earlier
+            // --- Create an embed response message for /chant ---
+            const embed = new EmbedBuilder()
+                .setColor('#00FF00') // Green color
+                .setTitle('Japa Rounds Logged!')
+                .setDescription(`You logged **${rounds}** rounds for today (${format(todayIST, 'dd/MM/yyyy')}).`)
+                .addFields(
+                     { name: 'Current Chanting Streak', value: `${userStreak.streakCount} day(s) 🙏}`, inline: true }
+                );
+
+            console.log(`[${new Date().toISOString()}] Attempting to editReply for /chant command for user ${userId}`);
+            try {
                  await interaction.editReply({ embeds: [embed] });
+                 console.log(`[${new Date().toISOString()}] Successfully sent embed reply for /chant command for user ${userId}`);
+            } catch (editError) {
+                 console.error(`[${new Date().toISOString()}] Error editing reply with embed for /chant command for user ${userId}:`, editError);
             }
 
 
         }
-        // Removed /logpractice command handler
-        // else if (commandName === 'logpractice') { ... } // REMOVED
-        // Removed weeklysummary command handler
-        // else if (commandName === 'weeklysummary') { ... } // REMOVED
-        // Removed monthlysummary command handler
-        // else if (commandName === 'monthlysummary') { ... } // REMOVED
-        // Removed leaderboard command handler
-        // else if (commandName === 'leaderboard') { ... } // REMOVED
-        // Removed myscore command handler
-        // else if (commandName === 'myscore') { ... } // REMOVED
-
-        // Handle the /showscore command (Updated to only show streak)
+        // --- Handle /showscore command (Updated for database) ---
         else if (commandName === 'showscore') {
             console.log(`[${new Date().toISOString()}] Handling /showscore command for user ${interaction.user.tag}`);
             console.log(`[${new Date().toISOString()}] Attempting to defer reply for interaction ${interaction.id}`);
@@ -922,22 +875,67 @@ client.on('interactionCreate', async interaction => {
             const username = targetUser.globalName || targetUser.username; // Prefer global name
 
             try {
-                // --- Sheets Interaction: Get user's streak ---
+                // --- Database Interaction: Get user's streak ---
                 const userStreak = await getUserStreak(userId);
                 const currentStreak = userStreak ? userStreak.streakCount : 0;
 
-                // Removed logic for weekly, monthly, and all-time scores
+                // --- Database Interaction: Calculate scores for weekly, monthly, all-time ---
+                // This requires fetching Sadhana logs for the user.
+                const now = new Date();
+                const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE));
 
-                // Create an embed for showing user's score (only streak)
+                // Calculate start dates for weekly and monthly periods in IST
+                const startOfLast7DaysIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE)); // Start of the day 7 days ago
+                const startOfMonthIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE)); // Start of the current month
+
+                 console.log(`[${new Date().toISOString()}] Fetching Sadhana logs for user ${userId} for score calculation.`);
+                const allTimeLogs = await Sadhana.findAll({
+                    where: { userId: userId },
+                    order: [['date', 'ASC']] // Order by date for streak calculation if needed later
+                });
+                 console.log(`[${new Date().toISOString()}] Finished fetching Sadhana logs for user ${userId}. Found ${allTimeLogs.length} logs.`);
+
+
+                let weeklyScore = 0;
+                let monthlyScore = 0;
+                let allTimeScore = 0;
+                let weeklyLoggedDays = 0;
+                let monthlyLoggedDays = 0;
+                let allTimeLoggedDays = 0;
+
+                // Process logs to calculate scores for different periods
+                for (const log of allTimeLogs) {
+                    // Ensure log.date is treated as a Date object
+                    const logDate = log.date instanceof Date ? log.date : new Date(log.date);
+                    const logDateIST = startOfDay(toZonedTime(logDate, IST_TIMEZONE)); // Get start of log date in IST
+
+                    // All-Time Score
+                    allTimeScore += calculateScore(log.toJSON()); // Pass plain object
+                    allTimeLoggedDays++;
+
+                    // Weekly Score (last 7 days including today)
+                    if (!isBefore(logDateIST, startOfLast7DaysIST)) {
+                        weeklyScore += calculateScore(log.toJSON()); // Pass plain object
+                        weeklyLoggedDays++;
+                    }
+
+                    // Monthly Score (current month)
+                    if (!isBefore(logDateIST, startOfMonthIST)) {
+                         monthlyScore += calculateScore(log.toJSON()); // Pass plain object
+                         monthlyLoggedDays++;
+                    }
+                }
+
+
+                // Create an embed for showing user's score and streak
                 const embed = new EmbedBuilder()
                     .setColor('#00CED1') // Dark Cyan color
-                    .setTitle(`Chanting Streak for ${username}`) // Updated title
+                    .setTitle(`Practice Summary for ${username}`) // Updated title
                     .addFields(
-                        { name: 'Current Chanting Streak', value: `${currentStreak} day(s) 🙏` }
-                        // Removed score fields
-                        // { name: 'Weekly (Last 7 Days)', value: `${weeklyScore.toFixed(2)} points (${weeklyLoggedDays} logged)`, inline: true },
-                        // { name: `Monthly (${now.toLocaleString('default', { month: 'long', year: 'numeric' })})`, value: `${monthlyScore.toFixed(2)} points (${monthlyLoggedDays} logged)`, inline: true },
-                        // { name: 'All-Time', value: `${allTimeScore.toFixed(2)} points (${allTimeLoggedDays} logged)`, inline: true }
+                        { name: 'Current Chanting Streak', value: `${currentStreak} day(s) 🙏}` },
+                        { name: 'Weekly (Last 7 Days)', value: `${weeklyScore.toFixed(2)} points (${weeklyLoggedDays} logged)`, inline: true },
+                        { name: `Monthly (${now.toLocaleString('default', { month: 'long', year: 'numeric' })})`, value: `${monthlyScore.toFixed(2)} points (${monthlyLoggedDays} logged)`, inline: true },
+                        { name: 'All-Time', value: `${allTimeScore.toFixed(2)} points (${allTimeLoggedDays} logged)`, inline: true }
                     );
 
                 console.log(`[${new Date().toISOString()}] Attempting to editReply for showscore for user ${userId}`);
@@ -951,8 +949,8 @@ client.on('interactionCreate', async interaction => {
                  console.error(`[${new Date().toISOString()}] Error during /showscore command for user ${userId}:`, error);
                   const embed = new EmbedBuilder()
                       .setColor('#FF0000')
-                      .setTitle('Show Streak Failed') // Updated title
-                      .setDescription(`An error occurred while fetching streak data: ${error.message}`);
+                      .setTitle('Show Score Failed') // Updated title
+                      .setDescription(`An error occurred while fetching data: ${error.message}`);
                   await interaction.editReply({ embeds: [embed] });
             }
 
@@ -987,7 +985,9 @@ client.on('interactionCreate', async interaction => {
             const targetUserId = targetUser.id;
 
             try {
-                // --- Sheets Interaction: Find or create and update the user's streak entry ---
+                // --- Database Interaction: Find or create and update the user's streak entry ---
+                 // This function calls getUserStreak and updateExistingUserStreak/addUserStreak (via Sequelize)
+                 // and will invalidate the cache upon successful WRITE.
                  const userStreak = await findOrCreateAndUpdateUserStreak(targetUserId, (currentUserStreak) => {
                      // This logic sets the streak to the new value and the last logged date to yesterday
                      // so the streak continues correctly on the next log.
@@ -1033,23 +1033,12 @@ client.on('interactionCreate', async interaction => {
             const embed = new EmbedBuilder()
                 .setColor('#FFFF00') // Yellow color
                 .setTitle('Helpful Resources and Commands') // Updated title
-                .setDescription(`Here is a helpful video: ${youtubeLink}\n\n`
-                              + `**Available Commands:**\n` // Updated description format
+                .setDescription(`Here are the available commands:\n\n` // Updated description format
                               + `- \`/chant <rounds>\`: Quickly log your japa rounds for today and update your chanting streak.\n`
-                              // Removed /logpractice from help
-                              // `- \`/logpractice\`: Open a form to log your full daily practice details.\n`
-                              // Removed weeklysummary from help
-                              // `- \`/weeklysummary\`: Shows your practice summary for the last 7 days.\n`
-                              // Removed monthlysummary from help
-                              // `- \`/monthlysummary\`: Shows your practice summary for the current month.\n`
-                              // Removed leaderboard from help
-                              // `- \`/leaderboard <period>\`: Shows the top devotees based on practice scores (weekly or monthly).\n`
-                              // Removed myscore from help
-                              // `- \`/myscore <period>\`: Shows your personal practice score for a specific period (weekly or monthly).\n`
-                              + `- \`/showscore <user>\`: Shows a user's chanting streak.\n` // Updated description
+                              + `- \`/showscore <user>\`: Shows a user\'s chanting streak and practice scores.\n` // Updated description
                               + `- \`/streakboard\`: Shows the current chanting streak leaderboard with pagination.\n` // Updated command name and description
-                              + `- \`/streakset <user> <streak>\`: Sets a user's chanting streak (Admin only).\n`
-                              + `- \`/checkdata <type> [user]\`: Check specific data from the Google Sheet (Admin only).`); // Updated description and options
+                              + `- \`/streakset <user> <streak>\`: Sets a user\'s chanting streak (Admin only).\n`
+                              + `- \`/checkdata <type> [user] [date_string]\`: Check specific data from the database (Admin only).`); // Updated description and options
 
             console.log(`[${new Date().toISOString()}] Attempting to reply for help command for user ${interaction.user.tag}`);
             // Reply with embed
@@ -1060,7 +1049,7 @@ client.on('interactionCreate', async interaction => {
                  console.error(`[${new Date().toISOString()}] Error replying for help command for user ${interaction.user.tag}:`, replyError);
             }
         }
-        // --- Handle /checkdata command (Updated for streaks only) ---
+        // --- Handle /checkdata command (Updated for database) ---
         else if (commandName === 'checkdata') {
             if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
                  // Reply with embed for insufficient permissions
@@ -1073,7 +1062,6 @@ client.on('interactionCreate', async interaction => {
             }
             console.log(`[${new Date().toISOString()}] Handling /checkdata command for user ${interaction.user.tag}`);
 
-            // Removed ephemeral flag from deferReply
             console.log(`[${new Date().toISOString()}] Attempting to defer reply for interaction ${interaction.id}`);
             try {
                 await interaction.deferReply();
@@ -1087,11 +1075,7 @@ client.on('interactionCreate', async interaction => {
 
             const dataType = interaction.options.getString('type');
             const targetUser = interaction.options.getUser('user');
-            // Removed dateString and date component options
-            // const dateString = interaction.options.getString('date_string'); // REMOVED
-            // const day = interaction.options.getInteger('day'); // REMOVED
-            // const month = interaction.options.getInteger('month'); // REMOVED
-            // const year = interaction.options.getInteger('year'); // REMOVED
+            const dateString = interaction.options.getString('date_string');
 
 
             // Create an embed for the checkdata results
@@ -1103,9 +1087,6 @@ client.on('interactionCreate', async interaction => {
 
             try {
                 switch (dataType) {
-                    // Removed case for 'user_log_by_date'
-                    // case 'user_log_by_date': { ... } // REMOVED
-
                     case 'user_streak':
                         if (!targetUser) {
                              embedDescription = 'For "User Streak", you must provide a user.';
@@ -1114,7 +1095,7 @@ client.on('interactionCreate', async interaction => {
                              await interaction.editReply({ embeds: [embed] });
                             return;
                         }
-                        // --- Sheets Interaction: Get user streak ---
+                        // --- Database Interaction: Get user's streak ---
                         const userStreak = await getUserStreak(targetUser.id);
 
                         if (userStreak) {
@@ -1130,15 +1111,69 @@ client.on('interactionCreate', async interaction => {
                         }
                         break;
 
-                    // Removed case for 'total_sadhana_count'
-                    // case 'total_sadhana_count': { ... } // REMOVED
-
                     case 'total_streak_count':
-                        // --- Sheets Interaction: Get total streak count ---
+                        // --- Database Interaction: Get total streak count ---
                         const totalStreakCount = await getTotalUserStreakCount();
-                        embedDescription = `**Total User Streak Entries in Sheet:** ${totalStreakCount}`;
+                        embedDescription = `**Total User Streak Entries in Database:** ${totalStreakCount}`;
                         embed.setDescription(embedDescription);
                         break;
+
+                    case 'user_sadhana_log_by_date':
+                         if (!targetUser || !dateString) {
+                             embedDescription = 'For "User Sadhana Log by Date", you must provide both a user and a date string (YYYY-MM-DD).';
+                             embed.setColor('#FF0000');
+                             embed.setDescription(embedDescription);
+                             await interaction.editReply({ embeds: [embed] });
+                             return;
+                         }
+
+                        const parsedDate = parse(dateString, 'yyyy-MM-dd', new Date());
+                         if (isNaN(parsedDate.getTime())) {
+                             embedDescription = 'Invalid date string format. Please use YYYY-MM-DD.';
+                             embed.setColor('#FF0000');
+                             embed.setDescription(embedDescription);
+                             await interaction.editReply({ embeds: [embed] });
+                             return;
+                         }
+
+                        const targetDateIST = startOfDay(toZonedTime(parsedDate, IST_TIMEZONE));
+
+                         console.log(`[${new Date().toISOString()}] Fetching Sadhana log for user ${targetUser.id} on date ${dateString} from database.`);
+                        const sadhanaLog = await Sadhana.findOne({
+                             where: {
+                                 userId: targetUser.id,
+                                 // Find entries within the IST day for the target date
+                                 date: {
+                                     [Op.gte]: startOfDay(toZonedTime(parsedDate, IST_TIMEZONE)),
+                                     [Op.lte]: endOfDay(toZonedTime(parsedDate, IST_TIMEZONE))
+                                 }
+                             }
+                        });
+
+                         if (sadhanaLog) {
+                             const logData = sadhanaLog.toJSON();
+                             embed.setTitle(`Sadhana Log for ${targetUser.username} on ${format(targetDateIST, 'dd/MM/yyyy')}`);
+                             embed.addFields(
+                                 { name: 'Japa Rounds', value: logData.japaRounds?.toString() || '0', inline: true },
+                                 { name: 'Study Hours', value: logData.studyHours?.toFixed(1) || '0.0', inline: true },
+                                 { name: 'Listening Hours', value: logData.listeningHours?.toFixed(1) || '0.0', inline: true },
+                                 { name: 'Reading Details', value: logData.readingDetails || 'None', inline: true },
+                                 { name: 'Waking Time', value: logData.wakingTime ? formatInTimeZone(logData.wakingTime, IST_TIMEZONE, 'hh:mm a zzz') : 'Not Logged', inline: true },
+                                 { name: 'Sleeping Time', value: logData.sleepingTime ? formatInTimeZone(logData.sleepingTime, IST_TIMEZONE, 'hh:mm a zzz') : 'Not Logged', inline: true },
+                                 { name: 'Woke Up Early', value: logData.wokeUpEarlyStatus ? 'Yes' : 'No', inline: true },
+                                 { name: 'Slept Early', value: logData.sleptEarlyStatus ? 'Yes' : 'No', inline: true },
+                                 { name: 'No Meat Eating', value: logData.noMeatEating ? 'Yes' : 'No', inline: true },
+                                 { name: 'No Gambling', value: logData.noGambling ? 'Yes' : 'No', inline: true },
+                                 { name: 'No Illicit Sex', value: logData.noIllicitSex ? 'Yes' : 'No', inline: true },
+                                 { name: 'No Intoxication', value: logData.noIntoxication ? 'Yes' : 'No', inline: true },
+                                 { name: 'Additional Service', value: logData.additionalService || 'None' },
+                                 { name: 'Calculated Score', value: logData.score?.toFixed(2) || '0.00', inline: true }
+                             );
+                         } else {
+                             embedDescription = `No Sadhana log found for ${targetUser.username} on ${format(targetDateIST, 'dd/MM/yyyy')}.`;
+                             embed.setDescription(embedDescription);
+                         }
+                         break;
 
                     default:
                         embedDescription = 'Invalid data type specified.';
@@ -1162,7 +1197,7 @@ client.on('interactionCreate', async interaction => {
             }
 
         }
-         // --- Handle /streakboard command (Renamed from /streaklog) ---
+         // --- Handle /streakboard command ---
         else if (commandName === 'streakboard') {
             console.log(`[${new Date().toISOString()}] Handling /streakboard command for user ${interaction.user.tag}`);
             // Defer the reply immediately
@@ -1176,11 +1211,11 @@ client.on('interactionCreate', async interaction => {
             console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
             try {
-                // --- Sheets Interaction: Fetch all streaks ---
+                // --- Database Interaction: Fetch all streaks ---
                 const userStreaks = await getAllUserStreaks();
 
                 const totalPages = Math.ceil(userStreaks.length / ENTRIES_PER_PAGE);
-                const page = 0; // Start on the first page
+                const page = 0;
 
                 // Generate and send the initial page
                 const { embeds, components } = await generateStreakboardPage(userStreaks, page, totalPages, interaction);
@@ -1194,82 +1229,82 @@ client.on('interactionCreate', async interaction => {
                 }
             } catch (error) {
                  console.error(`[${new Date().toISOString()}] Error during /streakboard command:`, error);
-                  const embed = new EmbedBuilder()
-                      .setColor('#FF0000')
-                      .setTitle('Streak Leaderboard Failed')
-                      .setDescription(`An error occurred while fetching streak data: ${error.message}`);
-                  await interaction.editReply({ embeds: [embed] });
-            }
-        }
-    }
-
-    // --- Handle Button Interactions ---
-    if (interaction.isButton()) {
-        console.log(`[${new Date().toISOString()}] Button interaction received: ${interaction.customId} for user ${interaction.user.tag}`);
-        // Check if the button custom ID starts with 'streakboard_page_'
-        if (interaction.customId.startsWith('streakboard_page_')) {
-             console.log(`[${new Date().toISOString()}] Handling streakboard pagination button.`);
-            // Defer the button update
-             try {
-                 await interaction.deferUpdate();
-                 console.log(`[${new Date().toISOString()}] Button update deferred successfully.`);
-             } catch (deferError) {
-                 console.error(`[${new Date().toISOString()}] Error deferring button update:`, deferError);
-                 return;
-             }
-             console.log(`[${new Date().toISOString()}] Deferral complete for button interaction. Proceeding with logic.`);
-
-
-            const requestedPage = parseInt(interaction.customId.split('_')[2], 10); // Extract page number from custom ID
-
-            try {
-                // --- Sheets Interaction: Re-fetch all streaks ---
-                // Re-fetch all streaks (can optimize this by storing in memory if needed)
-                const userStreaks = await getAllUserStreaks();
-
-                const totalPages = Math.ceil(userStreaks.length / ENTRIES_PER_PAGE);
-
-                // Validate the requested page number
-                if (isNaN(requestedPage) || requestedPage < 0 || requestedPage >= totalPages) {
-                     console.warn(`[${new Date().toISOString()}] Invalid page requested: ${requestedPage}. Total pages: ${totalPages}`);
-                     // Optionally, send a message indicating invalid page, or just do nothing.
-                     // For now, we'll just log and not update the message.
-                     return;
-                }
-
-                // Generate and update the message with the new page
-                const { embeds, components } = await generateStreakboardPage(userStreaks, requestedPage, totalPages, interaction);
-
-                console.log(`[${new Date().toISOString()}] Attempting to editReply for streakboard pagination.`);
-                try {
-                     await interaction.editReply({ embeds: embeds, components: components });
-                     console.log(`[${new Date().toISOString()}] Successfully edited reply for streakboard pagination.`);
-                } catch (editError) {
-                     console.error(`[${new Date().toISOString()}] Error editing reply for streakboard pagination:`, editError);
-                }
-            } catch (error) {
-                 console.error(`[${new Date().toISOString()}] Error during streakboard pagination button:`, error);
                  const embed = new EmbedBuilder()
                      .setColor('#FF0000')
                      .setTitle('Streak Leaderboard Failed')
                      .setDescription(`An error occurred while fetching streak data: ${error.message}`);
-                 await interaction.editReply({ embeds: [embed], components: [] }); // Remove buttons on error
+                 await interaction.editReply({ embeds: [embed] });
             }
-
         }
-    }
+         // --- REMOVED Handle Modal Submit Interactions ---
+        // Note: If you want to re-implement the /logpractice modal, you would add
+        // an interaction.isModalSubmit() check here and handle the modal data.
+        // You would need to fetch or create a Sadhana entry and update its fields
+        // based on the modal inputs, then save it.
+        // Example structure (this is a simplified example, you'd need to map all modal fields):
+        /*
+        else if (interaction.isModalSubmit()) {
+            if (interaction.customId === 'logPracticeModal') {
+                await interaction.deferReply({ ephemeral: true }); // Defer ephemerally
 
-    // --- REMOVED Handle Modal Submit Interactions ---
-    // if (interaction.isModalSubmit()) { ... } // REMOVED
+                const userId = interaction.user.id;
+                const guildId = interaction.guild?.id;
+                const now = new Date();
+                const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE));
+
+                // Get data from modal inputs
+                const japaRounds = parseInt(interaction.fields.getTextInputValue('japaRoundsInput'), 10) || 0;
+                // ... get other fields
+
+                try {
+                    // Find or create Sadhana entry for today
+                    const [sadhanaEntry, created] = await Sadhana.findOrCreate({
+                        where: { userId: userId, date: todayIST },
+                        defaults: { userId: userId, guildId: guildId, date: todayIST }
+                    });
+
+                    // Update fields from modal input
+                    sadhanaEntry.japaRounds = japaRounds;
+                    // ... update other fields
+
+                    // Recalculate and save score
+                    sadhanaEntry.score = calculateScore(sadhanaEntry.toJSON());
+                    await sadhanaEntry.save();
+
+                    // Send confirmation reply
+                    const embed = new EmbedBuilder()
+                        .setColor('#00FF00')
+                        .setTitle('Practice Logged Successfully!');
+                    // ... add fields to embed based on logged data ...
+
+                    await interaction.editReply({ embeds: [embed], ephemeral: true });
+
+                } catch (error) {
+                    console.error(`Error processing logPracticeModal for user ${userId}:`, error);
+                    const embed = new EmbedBuilder()
+                        .setColor('#FF0000')
+                        .setTitle('Logging Failed')
+                        .setDescription('An error occurred while processing your practice log.');
+                    await interaction.editReply({ embeds: [embed], ephemeral: true });
+                }
+            }
+        }
+        */
+    }
 });
 
 
-// Start the Google Sheets authentication process
-// Discord client login is moved inside the authentication success callback
-authenticateGoogleSheets();
+// Start the database connection and sync models
+// Discord client login is moved inside the database connection success callback
+connectDB();
 
 
-// --- Optional: Keep alive web server for hosting platforms ---
+// Basic error handling for issues with the Discord client itself (like login failures).
+client.on('error', error => {
+    console.error('Something went wrong with the Discord client:', error);
+});
+
+// Optional: Keep alive web server for hosting platforms
 // This remains the same.
 const express = require("express");
 const app = express();
