@@ -861,24 +861,18 @@ client.on('interactionCreate', async interaction => {
                  });
 
 
-                // --- Create an embed response message for /chant ---
-                const embed = new EmbedBuilder()
-                    .setColor('#00FF00') // Green color
-                    .setTitle('Japa Rounds Logged!')
-                    .setDescription(`You logged **${rounds}** rounds for today (${format(todayIST, 'dd/MM/yyyy')}).`) // Use 'rounds' directly
-                    .addFields(
-                         // Removed score field as Sadhana logs are removed
-                         // { name: 'Score for today (so far)', value: sadhanaEntry.score.toString(), inline: true },
-                         { name: 'Current Chanting Streak', value: `${userStreak.streakCount} day(s) 🙏`, inline: true }
-                    );
-
-                console.log(`[${new Date().toISOString()}] Attempting to editReply for /chant command for user ${userId}`);
+                // --- Test: Send a basic text reply instead of embed ---
+                console.log(`[${new Date().toISOString()}] Sheets update complete. Attempting to send plain text reply for user ${userId}`);
                 try {
-                     await interaction.editReply({ embeds: [embed] });
-                     console.log(`[${new Date().toISOString()}] Successfully edited reply for /chant command for user ${userId}`);
+                     // Use content instead of embeds
+                     await interaction.editReply({ content: `Logged ${rounds} rounds. Your streak is now ${userStreak.streakCount} day(s).` });
+                     console.log(`[${new Date().toISOString()}] Successfully sent plain text reply for /chant command for user ${userId}`);
                 } catch (editError) {
-                     console.error(`[${new Date().toISOString()}] Error editing reply for /chant command for user ${userId}:`, editError);
+                     console.error(`[${new Date().toISOString()}] Error editing reply with plain text for /chant command for user ${userId}:`, editError);
                 }
+
+                // Removed the original embed creation and editReply with embed
+
 
             } catch (error) {
                 console.error(`[${new Date().toISOString()}] Error during /chant command for user ${userId}:`, error);
