@@ -297,7 +297,16 @@ function calculateScore(log) {
         score += 1;
     }
 
-    // Note: Accessing the boolean status from the log object
+    // Removed scoring for mangalaArati and morningProgram
+    // if (log.mangalaArati === true) {
+    //     score += 1;
+    // }
+    //
+    // if (log.morningProgram === true) {
+    //     score += 1;
+    // }
+
+    // Note: Accessing the boolean status from Sequelize would be log.wokeUpEarlyStatus
     if (log.wokeUpEarlyStatus === true) {
         score += 1;
     }
@@ -359,7 +368,7 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildPresences,
-        GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.DirectMessages, // Might need this for modals in DMs, though typically modals are guild-based
     ],
 });
 
@@ -369,7 +378,7 @@ const client = new Client({
 const commands = [
      {
         name: 'chant',
-        description: 'Log your japa rounds chanted for today and update your streak.', // Updated description
+        description: 'Log your japa rounds chanted for today.',
         options: [
             {
                 name: 'rounds',
@@ -380,13 +389,58 @@ const commands = [
         ],
     },
     {
+        name: 'logpractice',
+        description: 'Log your daily spiritual practices using a form.',
+        // No options defined here, the modal handles input
+    },
+    {
+        name: 'weeklysummary',
+        description: 'Shows your spiritual practice summary for the last 7 days.',
+    },
+    {
+        name: 'monthlysummary',
+        description: 'Shows your spiritual practice summary for the current month.',
+    },
+     {
+        name: 'leaderboard',
+        description: 'Shows the top devotees based on practice scores.',
+        options: [
+            {
+                name: 'period',
+                type: 3, // STRING
+                description: 'Select the period for the leaderboard',
+                required: true,
+                choices: [
+                    { name: 'Weekly', value: 'weekly' },
+                    { name: 'Monthly', value: 'monthly' },
+                ],
+            },
+        ],
+    },
+    {
+        name: 'myscore',
+        description: 'Shows your personal practice score for a specific period.',
+        options: [
+            {
+                name: 'period',
+                type: 3, // STRING
+                description: 'Select the period for your score',
+                required: true,
+                choices: [
+                    { name: 'Weekly', value: 'weekly' },
+                    { name: 'Monthly', value: 'monthly'},
+                ],
+            },
+        ],
+    },
+    {
         name: 'showscore',
-        description: 'Shows a user\'s chanting streak and practice scores.', // Updated description
+        description: 'Shows a user\'s personal practice scores (weekly, monthly, all-time) and streak.',
         options: [
             {
                 name: 'user',
                 type: 6, // USER
-                description: 'The user whose data to show.', // Updated description
+                description: 'The user whose data to show.',
                 required: true,
             },
         ],
@@ -416,7 +470,7 @@ const commands = [
     },
     {
         name: 'checkdata',
-        description: 'Check specific data from the database (Admin only).', // Updated description
+        description: 'Check specific data from the database (Admin only).',
         options: [
             {
                 name: 'type',
@@ -424,21 +478,41 @@ const commands = [
                 description: 'Type of data to check',
                 required: true,
                 choices: [
+                    { name: 'User Log by Date', value: 'user_sadhana_log_by_date' }, // Corrected value to match case
                     { name: 'User Streak', value: 'user_streak' },
+                    { name: 'Total Sadhana Entries Count', value: 'total_sadhana_count' },
                     { name: 'Total User Streak Entries Count', value: 'total_streak_count' },
-                    { name: 'User Sadhana Log by Date', value: 'user_sadhana_log_by_date' }, // Added back Sadhana check
                 ],
             },
             {
                 name: 'user',
                 type: 6, // USER
-                description: 'The user to check data for (required for User Streak and Sadhana Log).', // Updated description
+                description: 'The user to check data for (required for User Log and User Streak).',
                 required: false,
             },
              {
-                name: 'date_string',
+                name: 'date_string', // New option for date string
                 type: 3, // STRING
-                description: 'Date for Sadhana Log (YYYY-MM-DD format, required for User Sadhana Log).',
+                description: 'Date of the log (e.g., 07/05/2025) (required for User Log by Date).',
+                required: false, // Make required true in handler logic
+            },
+            // Kept these options but made them not required, handler logic will prioritize date_string
+             {
+                name: 'day',
+                type: 4, // INTEGER
+                description: 'Day of the month (optional, use date_string instead).',
+                required: false,
+            },
+            {
+                name: 'month',
+                type: 4, // INTEGER
+                description: 'Month (1-12) (optional, use date_string instead).',
+                required: false,
+            },
+            {
+                name: 'year',
+                type: 4, // INTEGER
+                description: 'Year (e.g., 2023) (optional, use date_string instead).',
                 required: false,
             },
         ],
@@ -449,7 +523,6 @@ const commands = [
         description: 'Shows the current chanting streak leaderboard.',
     },
 ];
-
 
 const rest = new REST({ version: '10' }).setToken(token);
 
@@ -467,8 +540,92 @@ const rest = new REST({ version: '10' }).setToken(token);
 })();
 
 
+// --- Define the Log Practice Modal ---
+const logPracticeModal = new ModalBuilder()
+    .setCustomId('logPracticeModal') // Unique ID for this modal
+    .setTitle('Log Your Daily Practice');
+
+// Create text input components for the modal
+const dateInput = new TextInputBuilder()
+    .setCustomId('dateInput')
+    .setLabel('Date (dd/mm/yyyy)')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setPlaceholder('e.g., 07/05/2025');
+
+// Waking Time and Sleeping Time are removed from this modal to fit within the 5-row limit.
+// const wakingTimeInput = new TextInputBuilder()
+//     .setCustomId('wakingTimeInput')
+//     .setLabel('Waking Time (h:mm AM/PM or "Not Slept")')
+//     .setStyle(TextInputStyle.Short)
+//     .setRequired(true)
+//     .setPlaceholder('e.g., 4:30 AM or Not Slept');
+
+const japaRoundsInput = new TextInputBuilder()
+    .setCustomId('japaRoundsInput')
+    .setLabel('Japa Rounds Chanted')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setPlaceholder('e.g., 16');
+
+// Study Hours is now included in the modal
+const studyHoursInput = new TextInputBuilder()
+    .setCustomId('studyHoursInput')
+    .setLabel('Study Hours')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setPlaceholder('e.g., 1.5');
+
+const readingDetailsInput = new TextInputBuilder()
+    .setCustomId('readingDetailsInput')
+    .setLabel('Reading Details (What you read and how much)')
+    .setStyle(TextInputStyle.Paragraph) // Use Paragraph for longer text
+    .setRequired(true)
+    .setPlaceholder('e.g., Bhagavad Gita Ch 2, 10 pages');
+
+const listeningHoursInput = new TextInputBuilder()
+    .setCustomId('listeningHoursInput')
+    .setLabel('Listening Hours')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setPlaceholder('e.g., 0.75');
+
+// Sleeping Time is removed from this modal to fit within the 5-row limit.
+// const sleepingTimeInput = new TextInputBuilder()
+//     .setCustomId('sleepingTimeInput')
+//     .setLabel('Sleeping Time (h:mm AM/PM or "Not Slept")')
+//     .setStyle(TextInputInputStyle.Short)
+//     .setRequired(true)
+//     .setPlaceholder('e.g., 10:30 PM or Not Slept');
+
+// Regulative Principles input is removed from this modal.
+// const regulativePrinciplesInput = new TextInputBuilder()
+//     .setCustomId('regulativePrinciplesInput')
+//     .setLabel('Regulative Principles (Yes/No, comma sep)') // Shortened label
+//     .setStyle(TextInputStyle.Short)
+//     .setRequired(true)
+//     .setPlaceholder('e.g., Yes, Yes, Yes, Yes (Meat, Gambling, Sex, Intoxication)');
+
+// Additional Service input is removed from the modal to fit within the 5-row limit.
+// const additionalServiceInput = new TextInputBuilder()
+//     .setCustomId('additionalServiceInput')
+//     .setLabel('Additional Service (Optional)')
+//     .setStyle(TextInputStyle.Paragraph)
+//     .setRequired(false) // This is optional
+    // .setPlaceholder('e.g., Distributed flyers, Cleaned temple');
+
+
+// Add inputs to the modal, grouping them into 5 Action Rows, one input per row for short inputs.
+logPracticeModal.addComponents(
+    { type: 1, components: [dateInput] }, // Row 1: Date (Short)
+    { type: 1, components: [japaRoundsInput] }, // Row 2: Japa Rounds (Short)
+    { type: 1, components: [studyHoursInput] }, // Row 3: Study Hours (Short)
+    { type: 1, components: [listeningHoursInput] }, // Row 4: Listening Hours (Short)
+    { type: 1, components: [readingDetailsInput] } // Row 5: Reading Details (Paragraph)
+);
+
+
 // --- Helper function to generate a streakboard page embed and components ---
-// This function remains the same, it operates on an array of streak objects
 async function generateStreakboardPage(streaks, page, totalPages, interaction) {
     const start = page * ENTRIES_PER_PAGE;
     const end = start + ENTRIES_PER_PAGE;
@@ -488,21 +645,18 @@ async function generateStreakboardPage(streaks, page, totalPages, interaction) {
             const globalRank = start + i + 1; // Calculate global rank
             let username = 'Unknown User';
              try {
-                 // Fetch user/member to get username
                  if (interaction.guild) {
                     const member = await interaction.guild.members.fetch(userStreak.userId);
                      username = member.user.globalName || member.user.username; // Prefer global name
                  } else {
-                     // If not in a guild context (e.g., DM), fetch the user directly
                      const user = await client.users.fetch(userStreak.userId);
                      username = user.globalName || user.username; // Prefer global name
                  }
              } catch (err) {
-                 console.warn(`Could not fetch user/member ${userStreak.userId} for streakboard:`, err.message);
-                 username = `User ID: ${userStreak.userId}`; // Fallback to user ID if fetch fails
+                 console.warn(`Could not fetch user/member ${userStreak.userId}:`, err.message);
+                 username = `User ID: ${userStreak.userId}`;
              }
 
-            // Access data using object properties from Sequelize model output
             leaderboardDescription += `${globalRank}. **${username}**: ${userStreak.streakCount} day(s) 🙏\n`;
         }
         embed.setDescription(leaderboardDescription);
@@ -523,6 +677,7 @@ async function generateStreakboardPage(streaks, page, totalPages, interaction) {
                 .setDisabled(page >= totalPages - 1), // Disable if on the last page
         );
 
+    // Only return components if there is more than one page
     return { embeds: [embed], components: totalPages > 1 ? [row] : [] };
 }
 
@@ -588,7 +743,7 @@ client.once('ready', () => {
                                 const minutes = Math.floor((timeRemainingMs % (1000 * 60 * 60)) / (1000 * 60));
 
                                 const warningMessage = `Hare Krishna! 🙏 Your chanting streak of ${userStreak.streakCount} day(s) is about to be lost! You haven't logged your practice for today yet.`;
-                                const timeRemainingMessage = `You have about ${hours} hours and ${minutes} minutes remaining to log your rounds using \`/chant <rounds>\`. Don't miss your streak!`; // Updated message
+                                const timeRemainingMessage = `You have about ${hours} hours and ${minutes} minutes remaining to log your rounds using \`/chant <rounds>\` or log your full practice using \`/logpractice\`. Don't miss your streak!`;
 
                                 const embed = new EmbedBuilder()
                                     .setColor('#FFCC00') // Yellow/Orange color for warning
@@ -634,8 +789,10 @@ client.once('ready', () => {
             if (channel && channel.isTextBased()) {
                 const embed = new EmbedBuilder()
                     .setColor('#0099FF') // Blue color
-                    .setTitle('Daily Chanting Reminder!')
-                    .setDescription(`Hare Krishna! 🙏 Remember to log your japa rounds for today using \`/chant <rounds>\` to keep your streak alive!`); // Updated message
+                    .setTitle('Daily Practice Reminder!')
+                    .setDescription(`Hare Krishna! 🙏 Remember to log your spiritual practices for today.\n\n`
+                                  + `Quickly log your japa rounds using \`/chant <rounds>\`.\n`
+                                  + `Log your full practice details using \`/logpractice\`.`);
 
                 // Use channel.send to send the message
                 // To mention everyone, you would add allowedMentions and content: '@everyone'
@@ -660,12 +817,8 @@ client.once('ready', () => {
         timezone: IST_TIMEZONE // Ensure the cron job runs based on IST
     });
 
+
 });
-
-// Start the database connection and sync models
-// Discord client login is moved inside the database connection success callback
-connectDB();
-
 
 client.on('interactionCreate', async interaction => {
     console.log(`[${new Date().toISOString()}] Interaction received: ${interaction.id}, Type: ${interaction.type}, Command: ${interaction.isCommand() ? interaction.commandName : 'N/A'}, Modal: ${interaction.isModalSubmit() ? interaction.customId : 'N/A'}, Button: ${interaction.isButton() ? interaction.customId : 'N/A'}`);
@@ -689,7 +842,7 @@ client.on('interactionCreate', async interaction => {
 
             const rounds = interaction.options.getInteger('rounds');
             const userId = interaction.user.id;
-            const guildId = interaction.guild?.id; // Get guildId if available
+            const guildId = interaction.guild?.id;
             const now = new Date();
             const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE)); // Get start of today in IST
 
@@ -705,11 +858,11 @@ client.on('interactionCreate', async interaction => {
             // --- Database Interaction for /chant (Sadhana Log part) ---
             // This part logs the japa rounds in the Sadhana table.
             let sadhanaEntry;
-            let sadhanaCreated;
+            let created;
             console.log(`[${new Date().toISOString()}] Starting database findOrCreate for Sadhana log (/chant) for user ${userId} on ${format(todayIST, 'yyyy-MM-dd')}`);
             try {
                  // Find or create a Sadhana entry for today for this user
-                 [sadhanaEntry, sadhanaCreated] = await Sadhana.findOrCreate({
+                 [sadhanaEntry, created] = await Sadhana.findOrCreate({
                     where: {
                         userId: userId,
                          // Find entries within the IST day for today
@@ -739,7 +892,7 @@ client.on('interactionCreate', async interaction => {
                         score: 0, // Calculate score after updating
                     }
                 });
-                 console.log(`[${new Date().toISOString()}] Finished database findOrCreate for Sadhana log (/chant). Created: ${sadhanaCreated}`);
+                 console.log(`[${new Date().toISOString()}] Finished database findOrCreate for Sadhana log (/chant). Created: ${created}`);
             } catch (dbError) {
                 console.error(`Database error during findOrCreate for Sadhana log (/chant):`, dbError);
                  const embed = new EmbedBuilder()
@@ -751,7 +904,7 @@ client.on('interactionCreate', async interaction => {
             }
 
             // If updating an existing Sadhana entry, add the new rounds to existing rounds
-            if (!sadhanaCreated) {
+            if (!created) {
                  // Ensure sadhanaEntry.japaRounds is a number before adding
                  sadhanaEntry.japaRounds = (sadhanaEntry.japaRounds || 0) + rounds;
             }
@@ -777,63 +930,79 @@ client.on('interactionCreate', async interaction => {
             // --- Chanting Streak Logic for /chant ---
              // Find or create the user's streak entry in the UserStreak table
             let userStreak;
+            let streakCreated;
             console.log(`[${new Date().toISOString()}] Starting database findOrCreateAndUpdateUserStreak for streak (/chant) for user ${userId}`);
             try {
-                 userStreak = await findOrCreateAndUpdateUserStreak(userId, (currentUserStreak) => {
-                     let currentStreak = currentUserStreak ? currentUserStreak.streakCount : 0;
-                     const lastLoggedDateKey = currentUserStreak ? currentUserStreak.lastLoggedDateKey : null;
-                     let newStreak = currentStreak;
-
-                     const lastLoggedDate = lastLoggedDateKey ? startOfDay(parse(lastLoggedDateKey, 'yyyy-MM-dd', new Date())) : null;
-
-                     if (todayIST && !isNaN(todayIST.getTime())) {
-                         if (lastLoggedDate && !isNaN(lastLoggedDate.getTime())) {
-                             const dayDifference = differenceInCalendarDays(todayIST, lastLoggedDate);
-
-                             if (dayDifference === 1) {
-                                 newStreak = currentStreak + 1;
-                             } else if (dayDifference > 1) {
-                                 newStreak = 1; // Reset streak
-                             } else if (dayDifference === 0 && format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
-                                 // This case might occur if the date was manually set backward,
-                                 // but with /chant always using todayIST, this specific check might be redundant.
-                                 // Keeping it for robustness.
-                                 newStreak = currentStreak;
-                             }
-                             // If dayDifference is 0 and it's the same day, keep the streak
-                             // This case is implicitly handled as newStreak is initialized to currentStreak
-                         } else {
-                             newStreak = 1; // First log ever
-                         }
-
-                         // Determine the new last logged date key
-                         let newLastLoggedDateKey = lastLoggedDateKey;
-                         // Only update the last logged date key if the current log date is today
-                         // This ensures the streak is based on consecutive *days logged*, not just any log date.
-                         if (format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
-                              newLastLoggedDateKey = format(todayIST, 'yyyy-MM-dd');
-                         }
-
-
-                         // Return the calculated new streak count and date key
-                         return { newStreakCount: newStreak, newLastLoggedDateKey: newLastLoggedDateKey };
-                     } else {
-                          console.error(`Invalid todayIST date for streak logic (/chant): ${todayIST}`);
-                          // In case of invalid date, return current streak details to avoid data loss
-                          return { newStreakCount: currentStreak, newLastLoggedDateKey: lastLoggedDateKey };
-                     }
-                 });
-
-                 console.log(`[${new Date().toISOString()}] Finished database findOrCreateAndUpdateUserStreak for streak (/chant).`);
-
+                 [userStreak, streakCreated] = await UserStreak.findOrCreate({
+                    where: { userId: userId },
+                    defaults: {
+                        userId: userId,
+                        streakCount: 0,
+                        lastLoggedDateKey: null,
+                    }
+                });
+                 console.log(`[${new Date().toISOString()}] Finished database findOrCreate for streak (/chant). Created: ${streakCreated}`);
             } catch (dbError) {
-                 console.error(`Database error during findOrCreateAndUpdateUserStreak for streak (/chant):`, dbError);
+                 console.error(`Database error during findOrCreate for streak (/chant):`, dbError);
                   const embed = new EmbedBuilder()
                       .setColor('#FF0000')
                       .setTitle('Chanting Log Failed')
-                      .setDescription('An error occurred while updating streak data. Please try again later.');
+                      .setDescription('An error occurred while accessing streak data. Please try again later.');
                   await interaction.editReply({ embeds: [embed] });
                   return;
+            }
+
+
+            let currentStreak = userStreak.streakCount;
+            const lastLoggedDateKey = userStreak.lastLoggedDateKey;
+            let newStreak = currentStreak;
+
+            const lastLoggedDate = lastLoggedDateKey ? startOfDay(parse(lastLoggedDateKey, 'yyyy-MM-dd', new Date())) : null;
+
+            if (todayIST && !isNaN(todayIST.getTime())) {
+                if (lastLoggedDate && !isNaN(lastLoggedDate.getTime())) {
+                    const dayDifference = differenceInCalendarDays(todayIST, lastLoggedDate);
+
+                    if (dayDifference === 1) {
+                        newStreak = currentStreak + 1;
+                    } else if (dayDifference > 1) {
+                        newStreak = 1; // Reset streak
+                    } else if (dayDifference === 0 && format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
+                        newStreak = currentStreak;
+                    }
+                } else {
+                    newStreak = 1;
+                }
+
+                // Only update streak count and last logged date if the current log date is today or after the last logged date
+                // This prevents logging for past dates from incorrectly increasing the streak.
+                if (!lastLoggedDateKey || (lastLoggedDate && todayIST >= lastLoggedDate)) {
+                     userStreak.streakCount = newStreak;
+                     userStreak.lastLoggedDateKey = format(todayIST, 'yyyy-MM-dd');
+                }
+
+
+            } else {
+                 console.error(`Invalid todayIST date for streak logic (/chant): ${todayIST}`);
+                 // In case of invalid date, do not update streak
+            }
+
+            // Save the updated user streak
+            console.log(`[${new Date().toISOString()}] Starting database save for streak (/chant) for user ${userId}`);
+            try {
+                await userStreak.save();
+                // Invalidate the cache after writing
+                invalidateStreakCache();
+                console.log(`[${new Date().toISOString()}] Streak cache invalidated after updating user ${userId}.`);
+                console.log(`[${new Date().toISOString()}] Finished database save for streak (/chant).`);
+            } catch (dbError) {
+                console.error(`Database error during save for streak (/chant):`, dbError);
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000')
+                     .setTitle('Chanting Log Failed')
+                     .setDescription('An error occurred while saving streak data to the database. Please try again later.');
+                 await interaction.editReply({ embeds: [embed] });
+                 return;
             }
 
 
@@ -849,12 +1018,453 @@ client.on('interactionCreate', async interaction => {
             console.log(`[${new Date().toISOString()}] Attempting to editReply for /chant command for user ${userId}`);
             try {
                  await interaction.editReply({ embeds: [embed] });
-                 console.log(`[${new Date().toISOString()}] Successfully sent embed reply for /chant command for user ${userId}`);
+                 console.log(`[${new Date().toISOString()}] Successfully edited reply for /chant command for user ${userId}`);
             } catch (editError) {
                  console.error(`[${new Date().toISOString()}] Error editing reply with embed for /chant command for user ${userId}:`, editError);
+                 // Add a fallback message if editing the reply fails
+                 try {
+                     await interaction.followUp({ content: 'Successfully logged your chanting, but failed to update the original message.', ephemeral: true });
+                 } catch (followUpError) {
+                     console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                 }
             }
 
 
+        }
+        // --- Handle /logpractice command ---
+        else if (commandName === 'logpractice') {
+            console.log(`[${new Date().toISOString()}] Handling /logpractice command for user ${interaction.user.tag}`);
+            // Show the modal to the user
+            try {
+                 await interaction.showModal(logPracticeModal);
+                 console.log(`[${new Date().toISOString()}] Successfully showed logPracticeModal to user ${interaction.user.tag}`);
+            } catch (modalError) {
+                 console.error(`[${new Date().toISOString()}] Error showing logPracticeModal to user ${interaction.user.tag}:`, modalError);
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000')
+                     .setTitle('Logging Failed')
+                     .setDescription('An error occurred while opening the practice logging form. Please try again later.');
+                 await interaction.reply({ embeds: [embed], ephemeral: true });
+            }
+        }
+        // --- Handle /weeklysummary command ---
+        else if (commandName === 'weeklysummary') {
+             console.log(`[${new Date().toISOString()}] Handling /weeklysummary command for user ${interaction.user.tag}`);
+             // Defer the reply immediately
+             try {
+                 await interaction.deferReply();
+                 console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+             } catch (deferError) {
+                  console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                  return;
+             }
+             console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+
+             const userId = interaction.user.id;
+             const now = new Date();
+             // Calculate the start of the last 7 days including today in IST
+             const startDateIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE));
+             const endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE)); // End of today in IST
+
+             try {
+                 // Fetch Sadhana logs for the user within the last 7 days
+                 const logs = await Sadhana.findAll({
+                     where: {
+                         userId: userId,
+                         date: {
+                             [Op.gte]: startDateIST,
+                             [Op.lte]: endDateIST
+                         }
+                     },
+                     order: [['date', 'ASC']] // Order by date
+                 });
+
+                 let totalScore = 0;
+                 let loggedDays = 0;
+                 let japaRounds = 0;
+                 let studyHours = 0;
+                 let listeningHours = 0;
+                 let readingCount = 0; // Count days with reading details
+                 let wokeUpEarlyCount = 0;
+                 let sleptEarlyCount = 0;
+                 let regulativePrinciplesCount = 0; // Count days with all 4 principles followed
+                 let additionalServiceCount = 0; // Count days with additional service
+
+                 for (const log of logs) {
+                     const logData = log.toJSON(); // Get plain object
+                     totalScore += calculateScore(logData);
+                     loggedDays++;
+                     japaRounds += logData.japaRounds || 0;
+                     studyHours += logData.studyHours || 0;
+                     listeningHours += logData.listeningHours || 0;
+                     if (logData.readingDetails && logData.readingDetails.trim() !== '') readingCount++;
+                     if (logData.wokeUpEarlyStatus) wokeUpEarlyCount++;
+                     if (logData.sleptEarlyStatus) sleptEarlyCount++;
+
+                     // Check if all 4 regulative principles were followed for the day
+                     if (logData.noMeatEating && logData.noGambling && logData.noIllicitSex && logData.noIntoxication) {
+                         regulativePrinciplesCount++;
+                     }
+
+                     if (logData.additionalService && logData.additionalService.trim() !== '') additionalServiceCount++;
+                 }
+
+                 const embed = new EmbedBuilder()
+                     .setColor('#3498DB') // Blue color
+                     .setTitle(`Weekly Practice Summary for ${interaction.user.username}`)
+                     .setDescription(`Summary for the period: ${format(startDateIST, 'dd/MM/yyyy')} - ${format(endDateIST, 'dd/MM/yyyy')}`)
+                     .addFields(
+                         { name: 'Total Score', value: `${totalScore.toFixed(2)} points`, inline: true },
+                         { name: 'Logged Days', value: `${loggedDays} day(s)`, inline: true },
+                         { name: 'Total Japa Rounds', value: `${japaRounds}`, inline: true },
+                         { name: 'Total Study Hours', value: `${studyHours.toFixed(2)}`, inline: true },
+                         { name: 'Total Listening Hours', value: `${listeningHours.toFixed(2)}`, inline: true },
+                         { name: 'Days with Reading', value: `${readingCount}`, inline: true },
+                         { name: 'Days Woke Up Early', value: `${wokeUpEarlyCount}`, inline: true },
+                         { name: 'Days Slept Early', value: `${sleptEarlyCount}`, inline: true },
+                         { name: 'Days Regulative Principles Followed', value: `${regulativePrinciplesCount}`, inline: true },
+                         { name: 'Days with Additional Service', value: `${additionalServiceCount}`, inline: true }
+                     )
+                     .setFooter({ text: 'Based on your logged practices.' });
+
+                 console.log(`[${new Date().toISOString()}] Attempting to editReply for /weeklysummary command for user ${userId}`);
+                 try {
+                      await interaction.editReply({ embeds: [embed] });
+                      console.log(`[${new Date().toISOString()}] Successfully edited reply for /weeklysummary command for user ${userId}`);
+                 } catch (editError) {
+                      console.error(`[${new Date().toISOString()}] Error editing reply with embed for /weeklysummary command for user ${userId}:`, editError);
+                      // Add fallback
+                      try {
+                          await interaction.followUp({ content: 'Successfully generated summary, but failed to update the original message.', ephemeral: true });
+                      } catch (followUpError) {
+                          console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                      }
+                 }
+
+             } catch (error) {
+                  console.error(`[${new Date().toISOString()}] Error during /weeklysummary command for user ${userId}:`, error);
+                  const embed = new EmbedBuilder()
+                      .setColor('#FF0000')
+                      .setTitle('Weekly Summary Failed')
+                      .setDescription(`An error occurred while fetching your weekly practice summary: ${error.message}`);
+                  await interaction.editReply({ embeds: [embed] });
+             }
+        }
+        // --- Handle /monthlysummary command ---
+        else if (commandName === 'monthlysummary') {
+             console.log(`[${new Date().toISOString()}] Handling /monthlysummary command for user ${interaction.user.tag}`);
+             // Defer the reply immediately
+             try {
+                 await interaction.deferReply();
+                 console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+             } catch (deferError) {
+                  console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                  return;
+             }
+             console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+
+             const userId = interaction.user.id;
+             const now = new Date();
+             // Calculate the start of the current month in IST
+             const startDateIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE));
+             const endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE)); // End of today in IST
+
+             try {
+                 // Fetch Sadhana logs for the user within the current month
+                 const logs = await Sadhana.findAll({
+                     where: {
+                         userId: userId,
+                         date: {
+                             [Op.gte]: startDateIST,
+                             [Op.lte]: endDateIST
+                         }
+                     },
+                     order: [['date', 'ASC']] // Order by date
+                 });
+
+                 let totalScore = 0;
+                 let loggedDays = 0;
+                 let japaRounds = 0;
+                 let studyHours = 0;
+                 let listeningHours = 0;
+                 let readingCount = 0; // Count days with reading details
+                 let wokeUpEarlyCount = 0;
+                 let sleptEarlyCount = 0;
+                 let regulativePrinciplesCount = 0; // Count days with all 4 principles followed
+                 let additionalServiceCount = 0; // Count days with additional service
+
+                 for (const log of logs) {
+                     const logData = log.toJSON(); // Get plain object
+                     totalScore += calculateScore(logData);
+                     loggedDays++;
+                     japaRounds += logData.japaRounds || 0;
+                     studyHours += logData.studyHours || 0;
+                     listeningHours += logData.listeningHours || 0;
+                     if (logData.readingDetails && logData.readingDetails.trim() !== '') readingCount++;
+                     if (logData.wokeUpEarlyStatus) wokeUpEarlyCount++;
+                     if (logData.sleptEarlyStatus) sleptEarlyCount++;
+
+                     // Check if all 4 regulative principles were followed for the day
+                     if (logData.noMeatEating && logData.noGambling && logData.noIllicitSex && logData.noIntoxication) {
+                         regulativePrinciplesCount++;
+                     }
+
+                     if (logData.additionalService && logData.additionalService.trim() !== '') additionalServiceCount++;
+                 }
+
+                 const embed = new EmbedBuilder()
+                     .setColor('#2ECC71') // Green color
+                     .setTitle(`Monthly Practice Summary for ${interaction.user.username}`)
+                     .setDescription(`Summary for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`)
+                     .addFields(
+                         { name: 'Total Score', value: `${totalScore.toFixed(2)} points`, inline: true },
+                         { name: 'Logged Days', value: `${loggedDays} day(s)`, inline: true },
+                         { name: 'Total Japa Rounds', value: `${japaRounds}`, inline: true },
+                         { name: 'Total Study Hours', value: `${studyHours.toFixed(2)}`, inline: true },
+                         { name: 'Total Listening Hours', value: `${listeningHours.toFixed(2)}`, inline: true },
+                         { name: 'Days with Reading', value: `${readingCount}`, inline: true },
+                         { name: 'Days Woke Up Early', value: `${wokeUpEarlyCount}`, inline: true },
+                         { name: 'Days Slept Early', value: `${sleptEarlyCount}`, inline: true },
+                         { name: 'Days Regulative Principles Followed', value: `${regulativePrinciplesCount}`, inline: true },
+                         { name: 'Days with Additional Service', value: `${additionalServiceCount}`, inline: true }
+                     )
+                     .setFooter({ text: 'Based on your logged practices.' });
+
+                 console.log(`[${new Date().toISOString()}] Attempting to editReply for /monthlysummary command for user ${userId}`);
+                 try {
+                      await interaction.editReply({ embeds: [embed] });
+                      console.log(`[${new Date().toISOString()}] Successfully edited reply for /monthlysummary command for user ${userId}`);
+                 } catch (editError) {
+                      console.error(`[${new Date().toISOString()}] Error editing reply with embed for /monthlysummary command for user ${userId}:`, editError);
+                       // Add fallback
+                       try {
+                           await interaction.followUp({ content: 'Successfully generated summary, but failed to update the original message.', ephemeral: true });
+                       } catch (followUpError) {
+                           console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                       }
+                 }
+
+             } catch (error) {
+                  console.error(`[${new Date().toISOString()}] Error during /monthlysummary command for user ${userId}:`, error);
+                  const embed = new EmbedBuilder()
+                      .setColor('#FF0000')
+                      .setTitle('Monthly Summary Failed')
+                      .setDescription(`An error occurred while fetching your monthly practice summary: ${error.message}`);
+                  await interaction.editReply({ embeds: [embed] });
+             }
+        }
+        // --- Handle /leaderboard command ---
+        else if (commandName === 'leaderboard') {
+            console.log(`[${new Date().toISOString()}] Handling /leaderboard command for user ${interaction.user.tag}`);
+            // Defer the reply immediately
+            try {
+                await interaction.deferReply();
+                console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+            } catch (deferError) {
+                 console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                 return;
+            }
+            console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+
+            const period = interaction.options.getString('period');
+            const now = new Date();
+            let startDateIST;
+            let endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE)); // End of today in IST
+            let leaderboardTitle;
+            let leaderboardDescription;
+
+            if (period === 'weekly') {
+                startDateIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE)); // Start of the day 7 days ago
+                leaderboardTitle = 'Weekly Practice Leaderboard 🏆';
+                leaderboardDescription = `Top devotees based on scores from ${format(startDateIST, 'dd/MM/yyyy')} to ${format(endDateIST, 'dd/MM/yyyy')}`;
+            } else if (period === 'monthly') {
+                startDateIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE)); // Start of the current month
+                leaderboardTitle = 'Monthly Practice Leaderboard 🏆';
+                leaderboardDescription = `Top devotees based on scores for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`;
+            } else {
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000')
+                     .setTitle('Leaderboard Failed')
+                     .setDescription('Invalid period specified. Please choose "Weekly" or "Monthly".');
+                 await interaction.editReply({ embeds: [embed] });
+                 return;
+            }
+
+            try {
+                // Fetch Sadhana logs within the specified period
+                const logs = await Sadhana.findAll({
+                    where: {
+                        date: {
+                            [Op.gte]: startDateIST,
+                            [Op.lte]: endDateIST
+                        }
+                    },
+                    attributes: ['userId', 'japaRounds', 'studyHours', 'listeningHours', 'readingDetails', 'wokeUpEarlyStatus', 'sleptEarlyStatus', 'noMeatEating', 'noGambling', 'noIllicitSex', 'noIntoxication', 'additionalService'], // Fetch necessary attributes for score calculation
+                });
+
+                // Aggregate scores by user
+                const userScores = {};
+                for (const log of logs) {
+                    const logData = log.toJSON(); // Get plain object
+                    const userId = logData.userId;
+                    const score = calculateScore(logData);
+
+                    if (!userScores[userId]) {
+                        userScores[userId] = { totalScore: 0, loggedDays: 0 };
+                    }
+                    userScores[userId].totalScore += score;
+                    userScores[userId].loggedDays++;
+                }
+
+                // Convert aggregated scores to an array and sort
+                const sortedLeaderboard = Object.keys(userScores)
+                    .map(userId => ({ userId: userId, ...userScores[userId] }))
+                    .sort((a, b) => b.totalScore - a.totalScore); // Sort by total score descending
+
+                const embed = new EmbedBuilder()
+                    .setColor('#FFD700') // Gold color
+                    .setTitle(leaderboardTitle)
+                    .setDescription(leaderboardDescription);
+
+                if (sortedLeaderboard.length === 0) {
+                    embed.addFields({ name: 'No Data', value: 'No practice logs found for this period.' });
+                } else {
+                    // Limit to top 10 for the leaderboard display
+                    const topEntries = sortedLeaderboard.slice(0, 10);
+                    let leaderboardText = '';
+                    for (let i = 0; i < topEntries.length; i++) {
+                        const entry = topEntries[i];
+                        let username = 'Unknown User';
+                         try {
+                              if (interaction.guild) {
+                                 const member = await interaction.guild.members.fetch(entry.userId);
+                                  username = member.user.globalName || member.user.username; // Prefer global name
+                              } else {
+                                  const user = await client.users.fetch(entry.userId);
+                                  username = user.globalName || user.username; // Prefer global name
+                              }
+                         } catch (err) {
+                             console.warn(`Could not fetch user/member ${entry.userId} for leaderboard:`, err.message);
+                             username = `User ID: ${entry.userId}`;
+                         }
+                        leaderboardText += `${i + 1}. **${username}**: ${entry.totalScore.toFixed(2)} points (${entry.loggedDays} logged day(s))\n`;
+                    }
+                    embed.addFields({ name: 'Rankings', value: leaderboardText });
+                }
+
+                console.log(`[${new Date().toISOString()}] Attempting to editReply for /leaderboard command`);
+                try {
+                     await interaction.editReply({ embeds: [embed] });
+                     console.log(`[${new Date().toISOString()}] Successfully edited reply for /leaderboard command`);
+                 } catch (editError) {
+                      console.error(`[${new Date().toISOString()}] Error editing reply with embed for /leaderboard command:`, editError);
+                       // Add fallback
+                       try {
+                           await interaction.followUp({ content: 'Successfully generated leaderboard, but failed to update the original message.', ephemeral: true });
+                       } catch (followUpError) {
+                           console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                       }
+                 }
+
+            } catch (error) {
+                 console.error(`[${new Date().toISOString()}] Error during /leaderboard command:`, error);
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000')
+                     .setTitle('Leaderboard Failed')
+                     .setDescription(`An error occurred while fetching leaderboard data: ${error.message}`);
+                 await interaction.editReply({ embeds: [embed] });
+            }
+        }
+        // --- Handle /myscore command ---
+        else if (commandName === 'myscore') {
+             console.log(`[${new Date().toISOString()}] Handling /myscore command for user ${interaction.user.tag}`);
+             // Defer the reply immediately
+             try {
+                 await interaction.deferReply();
+                 console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+             } catch (deferError) {
+                  console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                  return;
+             }
+             console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+
+             const period = interaction.options.getString('period');
+             const userId = interaction.user.id;
+             const now = new Date();
+             let startDateIST;
+             let endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE)); // End of today in IST
+             let scoreTitle;
+             let scoreDescription;
+
+             if (period === 'weekly') {
+                 startDateIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE)); // Start of the day 7 days ago
+                 scoreTitle = 'Your Weekly Practice Score';
+                 scoreDescription = `Score for the period: ${format(startDateIST, 'dd/MM/yyyy')} - ${format(endDateIST, 'dd/MM/yyyy')}`;
+             } else if (period === 'monthly') {
+                 startDateIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE)); // Start of the current month
+                 scoreTitle = 'Your Monthly Practice Score';
+                 scoreDescription = `Score for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`;
+             } else {
+                  const embed = new EmbedBuilder()
+                      .setColor('#FF0000')
+                      .setTitle('My Score Failed')
+                      .setDescription('Invalid period specified. Please choose "Weekly" or "Monthly".');
+                  await interaction.editReply({ embeds: [embed] });
+                  return;
+             }
+
+             try {
+                 // Fetch Sadhana logs for the user within the specified period
+                 const logs = await Sadhana.findAll({
+                     where: {
+                         userId: userId,
+                         date: {
+                             [Op.gte]: startDateIST,
+                             [Op.lte]: endDateIST
+                         }
+                     },
+                     attributes: ['japaRounds', 'studyHours', 'listeningHours', 'readingDetails', 'wokeUpEarlyStatus', 'sleptEarlyStatus', 'noMeatEating', 'noGambling', 'noIllicitSex', 'noIntoxication', 'additionalService'], // Fetch necessary attributes
+                 });
+
+                 let totalScore = 0;
+                 let loggedDays = 0;
+                 for (const log of logs) {
+                     totalScore += calculateScore(log.toJSON()); // Pass plain object
+                     loggedDays++;
+                 }
+
+                 const embed = new EmbedBuilder()
+                     .setColor('#800080') // Purple color
+                     .setTitle(scoreTitle)
+                     .setDescription(scoreDescription)
+                     .addFields(
+                         { name: 'Total Score', value: `${totalScore.toFixed(2)} points`, inline: true },
+                         { name: 'Logged Days', value: `${loggedDays} day(s)`, inline: true }
+                     )
+                     .setFooter({ text: 'Based on your logged practices.' });
+
+                 console.log(`[${new Date().toISOString()}] Attempting to editReply for /myscore command for user ${userId}`);
+                 try {
+                      await interaction.editReply({ embeds: [embed] });
+                      console.log(`[${new Date().toISOString()}] Successfully edited reply for /myscore command for user ${userId}`);
+                  } catch (editError) {
+                       console.error(`[${new Date().toISOString()}] Error editing reply with embed for /myscore command for user ${userId}:`, editError);
+                        // Add fallback
+                        try {
+                            await interaction.followUp({ content: 'Successfully generated your score summary, but failed to update the original message.', ephemeral: true });
+                        } catch (followUpError) {
+                            console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                        }
+                  }
+
+             } catch (error) {
+                  console.error(`[${new Date().toISOString()}] Error during /myscore command for user ${userId}:`, error);
+                  const embed = new EmbedBuilder()
+                      .setColor('#FF0000')
+                      .setTitle('My Score Failed')
+                      .setDescription(`An error occurred while fetching your practice score: ${error.message}`);
+                  await interaction.editReply({ embeds: [embed] });
+             }
         }
         // --- Handle /showscore command (Updated for database) ---
         else if (commandName === 'showscore') {
@@ -944,6 +1554,12 @@ client.on('interactionCreate', async interaction => {
                      console.log(`[${new Date().toISOString()}] Successfully edited reply for showscore for user ${userId}`);
                 } catch (editError) {
                      console.error(`[${new Date().toISOString()}] Error editing reply for showscore for user ${userId}:`, editError);
+                      // Add fallback
+                      try {
+                          await interaction.followUp({ content: 'Successfully fetched user summary, but failed to update the original message.', ephemeral: true });
+                      } catch (followUpError) {
+                          console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                      }
                 }
             } catch (error) {
                  console.error(`[${new Date().toISOString()}] Error during /showscore command for user ${userId}:`, error);
@@ -1035,6 +1651,11 @@ client.on('interactionCreate', async interaction => {
                 .setTitle('Helpful Resources and Commands') // Updated title
                 .setDescription(`Here are the available commands:\n\n` // Updated description format
                               + `- \`/chant <rounds>\`: Quickly log your japa rounds for today and update your chanting streak.\n`
+                              + `- \`/logpractice\`: Open a form to log your full daily practice details.\n`
+                              + `- \`/weeklysummary\`: Shows your practice summary for the last 7 days.\n`
+                              + `- \`/monthlysummary\`: Shows your practice summary for the current month.\n`
+                              + `- \`/leaderboard <period>\`: Shows the top devotees based on practice scores (weekly or monthly).\n`
+                              + `- \`/myscore <period>\`: Shows your personal practice score for a specific period (weekly or monthly).\n`
                               + `- \`/showscore <user>\`: Shows a user\'s chanting streak and practice scores.\n` // Updated description
                               + `- \`/streakboard\`: Shows the current chanting streak leaderboard with pagination.\n` // Updated command name and description
                               + `- \`/streakset <user> <streak>\`: Sets a user\'s chanting streak (Admin only).\n`
@@ -1193,7 +1814,13 @@ client.on('interactionCreate', async interaction => {
                  await interaction.editReply({ embeds: [embed] });
                  console.log(`[${new Date().toISOString()}] Successfully edited reply for checkdata command`);
             } catch (editError) {
-                 console.error(`[${new Date().toISOString()}] Error editing reply for checkdata command:`, editError);
+                 console.error(`[${new Date().toISOString()}] Error editing reply with embed for /checkdata command:`, editError);
+                  // Add fallback
+                  try {
+                      await interaction.followUp({ content: 'Successfully fetched data, but failed to update the original message.', ephemeral: true });
+                  } catch (followUpError) {
+                      console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                  }
             }
 
         }
@@ -1225,7 +1852,13 @@ client.on('interactionCreate', async interaction => {
                      await interaction.editReply({ embeds: embeds, components: components });
                      console.log(`[${new Date().toISOString()}] Successfully edited reply for /streakboard command`);
                 } catch (editError) {
-                     console.error(`[${new Date().toISOString()}] Error editing reply for /streakboard command:`, editError);
+                     console.error(`[${new Date().toISOString()}] Error editing reply with embed for /streakboard command:`, editError);
+                      // Add fallback
+                      try {
+                          await interaction.followUp({ content: 'Successfully generated streakboard, but failed to update the original message.', ephemeral: true });
+                      } catch (followUpError) {
+                          console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                      }
                 }
             } catch (error) {
                  console.error(`[${new Date().toISOString()}] Error during /streakboard command:`, error);
@@ -1236,60 +1869,211 @@ client.on('interactionCreate', async interaction => {
                  await interaction.editReply({ embeds: [embed] });
             }
         }
-         // --- REMOVED Handle Modal Submit Interactions ---
-        // Note: If you want to re-implement the /logpractice modal, you would add
-        // an interaction.isModalSubmit() check here and handle the modal data.
-        // You would need to fetch or create a Sadhana entry and update its fields
-        // based on the modal inputs, then save it.
-        // Example structure (this is a simplified example, you'd need to map all modal fields):
-        /*
-        else if (interaction.isModalSubmit()) {
-            if (interaction.customId === 'logPracticeModal') {
-                await interaction.deferReply({ ephemeral: true }); // Defer ephemerally
+    }
 
-                const userId = interaction.user.id;
-                const guildId = interaction.guild?.id;
-                const now = new Date();
-                const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE));
-
-                // Get data from modal inputs
-                const japaRounds = parseInt(interaction.fields.getTextInputValue('japaRoundsInput'), 10) || 0;
-                // ... get other fields
-
-                try {
-                    // Find or create Sadhana entry for today
-                    const [sadhanaEntry, created] = await Sadhana.findOrCreate({
-                        where: { userId: userId, date: todayIST },
-                        defaults: { userId: userId, guildId: guildId, date: todayIST }
-                    });
-
-                    // Update fields from modal input
-                    sadhanaEntry.japaRounds = japaRounds;
-                    // ... update other fields
-
-                    // Recalculate and save score
-                    sadhanaEntry.score = calculateScore(sadhanaEntry.toJSON());
-                    await sadhanaEntry.save();
-
-                    // Send confirmation reply
-                    const embed = new EmbedBuilder()
-                        .setColor('#00FF00')
-                        .setTitle('Practice Logged Successfully!');
-                    // ... add fields to embed based on logged data ...
-
-                    await interaction.editReply({ embeds: [embed], ephemeral: true });
-
-                } catch (error) {
-                    console.error(`Error processing logPracticeModal for user ${userId}:`, error);
-                    const embed = new EmbedBuilder()
-                        .setColor('#FF0000')
-                        .setTitle('Logging Failed')
-                        .setDescription('An error occurred while processing your practice log.');
-                    await interaction.editReply({ embeds: [embed], ephemeral: true });
-                }
+    // --- Handle Modal Submit Interactions ---
+    // Note: If you want to re-implement the /logpractice modal, you would add
+    // an interaction.isModalSubmit() check here and handle the modal data.
+    // You would need to fetch or create a Sadhana entry and update its fields
+    // based on the modal inputs, then save it.
+    else if (interaction.isModalSubmit()) {
+        console.log(`[${new Date().toISOString()}] Modal submission received: ${interaction.customId} for user ${interaction.user.tag}`);
+        if (interaction.customId === 'logPracticeModal') {
+            console.log(`[${new Date().toISOString()}] Handling logPracticeModal submission for user ${interaction.user.tag}`);
+            // Defer the reply ephemerally so only the user sees the initial "Thinking..."
+            try {
+                 await interaction.deferReply({ ephemeral: true });
+                 console.log(`[${new Date().toISOString()}] Reply deferred successfully (ephemeral) for modal submission ${interaction.id}`);
+            } catch (deferError) {
+                 console.error(`[${new Date().toISOString()}] Error deferring reply for modal submission ${interaction.id}:`, deferError);
+                 return;
             }
+            console.log(`[${new Date().toISOString()}] Deferral complete for modal submission ${interaction.id}. Proceeding with modal logic.`);
+
+
+            const userId = interaction.user.id;
+            const guildId = interaction.guild?.id;
+            const now = new Date();
+            const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE)); // Get start of today in IST
+
+            // Get data from modal inputs
+            const dateString = interaction.fields.getTextInputValue('dateInput');
+            const japaRounds = parseInt(interaction.fields.getTextInputValue('japaRoundsInput'), 10) || 0;
+            const studyHours = parseFloat(interaction.fields.getTextInputValue('studyHoursInput')) || 0;
+            const listeningHours = parseFloat(interaction.fields.getTextInputValue('listeningHoursInput')) || 0;
+            const readingDetails = interaction.fields.getTextInputValue('readingDetailsInput');
+            // Waking/Sleeping times, Regulative Principles, Additional Service removed from modal
+
+
+            // Parse the date input from the modal (dd/mm/yyyy)
+            const parsedDate = parse(dateString, 'dd/MM/yyyy', new Date());
+
+            if (isNaN(parsedDate.getTime())) {
+                 const embed = new EmbedBuilder()
+                     .setColor('#FF0000')
+                     .setTitle('Logging Failed')
+                     .setDescription('Invalid date format. Please use dd/mm/yyyy.');
+                 await interaction.editReply({ embeds: [embed], ephemeral: true });
+                 return;
+            }
+
+            // Get the start of the day in IST for the parsed date
+            const logDateIST = startOfDay(toZonedTime(parsedDate, IST_TIMEZONE));
+
+
+            // --- Database Interaction for Modal Submission ---
+            let sadhanaEntry;
+            let created;
+             console.log(`[${new Date().toISOString()}] Starting database findOrCreate for modal submission for user ${userId} on ${format(logDateIST, 'yyyy-MM-dd')}`);
+            try {
+                // Find or create a Sadhana entry for the parsed date for this user
+                 [sadhanaEntry, created] = await Sadhana.findOrCreate({
+                    where: { userId: userId, date: logDateIST }, // Use the parsed date IST
+                    defaults: {
+                        userId: userId,
+                        guildId: guildId,
+                        date: logDateIST, // Store the start of the day in IST
+                        japaRounds: japaRounds,
+                        studyHours: studyHours,
+                        listeningHours: listeningHours,
+                        readingDetails: readingDetails,
+                         // Set other fields to default values as they are not provided by this modal
+                        wakingTime: null,
+                        wokeUpEarlyStatus: false,
+                        sleepingTime: null,
+                        sleptEarlyStatus: false,
+                        noMeatEating: false,
+                        noGambling: false,
+                        noIllicitSex: false,
+                        noIntoxication: false,
+                        additionalService: '',
+                        score: 0, // Calculate score after updating
+                    }
+                });
+                 console.log(`[${new Date().toISOString()}] Finished database findOrCreate for modal submission. Created: ${created}`);
+            } catch (dbError) {
+                 console.error(`Database error during findOrCreate for modal submission:`, dbError);
+                  const embed = new EmbedBuilder()
+                      .setColor('#FF0000')
+                      .setTitle('Logging Failed')
+                      .setDescription('An error occurred while accessing the database. Please try again later.');
+                 await interaction.editReply({ embeds: [embed], ephemeral: true });
+                 return;
+            }
+
+            // If updating an existing entry, update the fields from the modal
+            if (!created) {
+                sadhanaEntry.japaRounds = japaRounds;
+                sadhanaEntry.studyHours = studyHours;
+                sadhanaEntry.listeningHours = listeningHours;
+                sadhanaEntry.readingDetails = readingDetails;
+                // Note: Waking/Sleeping times, Regulative Principles, Additional Service are NOT updated by this modal
+            }
+
+            // Recalculate and save the score
+            sadhanaEntry.score = calculateScore(sadhanaEntry.toJSON()); // Pass plain object to calculateScore
+
+             console.log(`[${new Date().toISOString()}] Starting database save for modal submission for user ${userId} on ${format(logDateIST, 'yyyy-MM-dd')}`);
+            try {
+                await sadhanaEntry.save();
+                 console.log(`[${new Date().toISOString()}] Finished database save for modal submission.`);
+            } catch (dbError) {
+                 console.error(`Database error during save for modal submission:`, dbError);
+                  const embed = new EmbedBuilder()
+                      .setColor('#FF0000')
+                      .setTitle('Logging Failed')
+                      .setDescription('An error occurred while saving to the database. Please try again later.');
+                 await interaction.editReply({ embeds: [embed], ephemeral: true });
+                 return;
+            }
+
+            // --- Streak Logic for Modal Submission ---
+            // Update streak only if the log is for today
+             if (format(logDateIST, 'yyyy-MM-dd') === format(todayIST, 'yyyy-MM-dd')) {
+                 console.log(`[${new Date().toISOString()}] Log date is today. Updating streak for user ${userId}.`);
+                 try {
+                      const userStreak = await findOrCreateAndUpdateUserStreak(userId, (currentUserStreak) => {
+                          let currentStreak = currentUserStreak ? currentUserStreak.streakCount : 0;
+                          const lastLoggedDateKey = currentUserStreak ? currentUserStreak.lastLoggedDateKey : null;
+                          let newStreak = currentStreak;
+
+                          const lastLoggedDate = lastLoggedDateKey ? startOfDay(parse(lastLoggedDateKey, 'yyyy-MM-dd', new Date())) : null;
+
+                          if (todayIST && !isNaN(todayIST.getTime())) {
+                              if (lastLoggedDate && !isNaN(lastLoggedDate.getTime())) {
+                                  const dayDifference = differenceInCalendarDays(todayIST, lastLoggedDate);
+
+                                  if (dayDifference === 1) {
+                                      newStreak = currentStreak + 1;
+                                  } else if (dayDifference > 1) {
+                                      newStreak = 1; // Reset streak
+                                  } else if (dayDifference === 0 && format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
+                                      newStreak = currentStreak;
+                                  }
+                              } else {
+                                  newStreak = 1;
+                              }
+
+                              // Only update streak count and last logged date if the current log date is today or after the last logged date
+                               if (!lastLoggedDateKey || (lastLoggedDate && todayIST >= lastLoggedDate)) {
+                                   // This logic is handled by findOrCreateAndUpdateUserStreak's internal save
+                                   // We just need to return the calculated new streak and date key
+                                    return { newStreakCount: newStreak, newLastLoggedDateKey: format(todayIST, 'yyyy-MM-dd') };
+                               } else {
+                                   // If logging for a past date, do not change the streak
+                                    return { newStreakCount: currentStreak, newLastLoggedDateKey: lastLoggedDateKey };
+                               }
+
+
+                          } else {
+                               console.error(`Invalid todayIST date for streak logic (modal): ${todayIST}`);
+                               // In case of invalid date, return current streak details to avoid data loss
+                               return { newStreakCount: currentStreak, newLastLoggedDateKey: lastLoggedDateKey };
+                          }
+                      });
+                       console.log(`[${new Date().toISOString()}] Finished updating streak for user ${userId} from modal.`);
+                 } catch (dbError) {
+                      console.error(`Database error during streak update (modal):`, dbError);
+                       // This error is already handled by findOrCreateAndUpdateUserStreak, but log here too
+                 }
+             } else {
+                 console.log(`[${new Date().toISOString()}] Log date (${format(logDateIST, 'yyyy-MM-dd')}) is not today. Skipping streak update for user ${userId}.`);
+             }
+
+
+            // Create an embed response message for the modal submission
+            const embed = new EmbedBuilder()
+                .setColor('#00FF00') // Green color
+                .setTitle('Practice Logged Successfully!')
+                .setDescription(`Your practice for ${format(logDateIST, 'dd/MM/yyyy')} has been logged.`);
+
+            // Add fields based on the data logged
+            embed.addFields(
+                { name: 'Japa Rounds', value: japaRounds.toString(), inline: true },
+                { name: 'Study Hours', value: studyHours.toFixed(2), inline: true },
+                { name: 'Listening Hours', value: listeningHours.toFixed(2), inline: true },
+                { name: 'Reading Details', value: readingDetails || 'None' },
+                { name: 'Calculated Score', value: sadhanaEntry.score.toFixed(2), inline: true } // Use the score from the saved entry
+            );
+
+            console.log(`[${new Date().toISOString()}] Attempting to editReply for modal submission for user ${userId}`);
+            // Edit the deferred reply with the confirmation embed
+            try {
+                 await interaction.editReply({ embeds: [embed], ephemeral: true });
+                 console.log(`[${new Date().toISOString()}] Successfully edited reply for modal submission for user ${userId}`);
+            } catch (editError) {
+                 console.error(`[${new Date().toISOString()}] Error editing reply for modal submission for user ${userId}:`, editError);
+                 // Add fallback
+                 try {
+                     await interaction.followUp({ content: 'Successfully logged your practice, but failed to update the original message.', ephemeral: true });
+                 } catch (followUpError) {
+                     console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                 }
+            }
+
+
         }
-        */
+        // Handle other modal submissions if you add more later
     }
 });
 
