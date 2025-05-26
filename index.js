@@ -907,7 +907,7 @@ client.on('interactionCreate', async interaction => {
                 .setTitle('Japa Rounds Logged!')
                 .setDescription(`You logged **${rounds}** rounds for today (${format(todayIST, 'dd/MM/yyyy')}).`)
                 .addFields(
-                     { name: 'Current Chanting Streak', value: `${userStreak.streakCount} day(s) 🙏}`, inline: true }
+                     { name: 'Current Chanting Streak', value: `${userStreak.streakCount} day(s) 🙏`, inline: true }
                 );
 
             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /chant command for user ${userId}`);
