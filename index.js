@@ -28,10 +28,7 @@ const sequelize = new Sequelize(postgresUri, {
 });
 
 // Define the Sadhana Model
-// This model is included in case you want to re-implement the full logging later.
-// If you only need streaks, you can remove this model definition and related functions.
-const Sadhana = sequelize.define('Sadhana', { // Model name is 'Sadhana'
-    // Sequelize automatically adds an 'id' primary key column by default
+const Sadhana = sequelize.define('Sadhana', {
     userId: {
         type: DataTypes.STRING, // Use STRING for Discord IDs (they are large numbers)
         allowNull: false,
@@ -113,7 +110,6 @@ const Sadhana = sequelize.define('Sadhana', { // Model name is 'Sadhana'
 
 // Define the UserStreak Model
 const UserStreak = sequelize.define('UserStreak', {
-    // Sequelize automatically adds an 'id' primary key column by default
     userId: {
         type: DataTypes.STRING, // Discord user IDs are large numbers, store as string
         unique: true, // Each user should have only one streak entry
@@ -203,11 +199,6 @@ async function findOrCreateAndUpdateUserStreak(userId, updateLogicFn) {
         // Save the changes to the database
         await userStreakInstance.save();
 
-        // Invalidate the cache after writing
-        invalidateStreakCache();
-        console.log(`[${new Date().toISOString()}] Streak cache invalidated after updating user ${userId}.`);
-
-
          console.log(`User streak ${created ? 'created' : 'updated'} for user ${userId}.`);
 
          // Return the updated data as a plain object
@@ -220,29 +211,17 @@ async function findOrCreateAndUpdateUserStreak(userId, updateLogicFn) {
 }
 
 
-// Function to get all user streaks for the streakboard, using caching
+// Function to get all user streaks for the streakboard (no caching)
 async function getAllUserStreaks() {
-    const now = new Date();
-    // Check if cached data exists and is still valid
-    if (cachedStreaks && lastCacheTime && (now.getTime() - lastCacheTime.getTime() < CACHE_DURATION_MS)) {
-        console.log(`[${new Date().toISOString()}] Using cached streak data for getAllUserStreaks.`);
-        return cachedStreaks;
-    }
-
-    console.log(`[${new Date().toISOString()}] Cache expired or empty for getAllUserStreaks. Fetching fresh streak data from database.`);
+    console.log(`[${new Date().toISOString()}] Fetching fresh streak data from database for getAllUserStreaks.`);
     try {
         // Fetch all user streaks, ordered by streakCount descending
         const streaks = await UserStreak.findAll({
             order: [['streakCount', 'DESC']],
         });
 
-        // Convert Sequelize instances to plain objects for caching and processing
+        // Convert Sequelize instances to plain objects
         const plainStreaks = streaks.map(streak => streak.toJSON());
-
-        // Update the cache
-        cachedStreaks = plainStreaks;
-        lastCacheTime = new Date();
-        console.log(`[${new Date().toISOString()}] Streak cache updated.`);
 
         return plainStreaks;
 
@@ -252,17 +231,9 @@ async function getAllUserStreaks() {
     }
 }
 
-// Function to get the total count of user streak entries, using caching
-// This function can use the cachedStreaks array length if available
+// Function to get the total count of user streak entries (no caching)
 async function getTotalUserStreakCount() {
-    // If the full streak list is cached, we can just use its length
-    if (cachedStreaks !== null && cachedStreaks !== undefined) {
-         console.log(`[${new Date().toISOString()}] Using cached data length for getTotalUserStreakCount.`);
-         return cachedStreaks.length;
-    }
-
-    // If cache is not available, fetch directly from the database
-     console.log(`[${new Date().toISOString()}] Cache not available for getTotalUserStreakCount. Fetching directly from database.`);
+     console.log(`[${new Date().toISOString()}] Fetching total user streak count directly from database.`);
      try {
          const count = await UserStreak.count();
          console.log(`Total user streak entries counted: ${count} (fetched directly).`);
@@ -273,15 +244,7 @@ async function getTotalUserStreakCount() {
      }
 }
 
-// Helper function to invalidate the streak cache
-function invalidateStreakCache() {
-    cachedStreaks = null;
-    lastCacheTime = null;
-    console.log(`[${new Date().toISOString()}] Streak cache explicitly invalidated.`);
-}
-
 // Helper function to calculate the score (logic remains the same, operates on log object)
-// This function is used by the /showscore command to calculate scores from Sadhana entries.
 function calculateScore(log) {
     let score = 0;
 
@@ -297,16 +260,6 @@ function calculateScore(log) {
         score += 1;
     }
 
-    // Removed scoring for mangalaArati and morningProgram
-    // if (log.mangalaArati === true) {
-    //     score += 1;
-    // }
-    //
-    // if (log.morningProgram === true) {
-    //     score += 1;
-    // }
-
-    // Note: Accessing the boolean status from Sequelize would be log.wokeUpEarlyStatus
     if (log.wokeUpEarlyStatus === true) {
         score += 1;
     }
@@ -374,7 +327,6 @@ const client = new Client({
 
 
 // --- Define Slash Commands ---
-// Commands definition remains the same, only the implementation changes
 const commands = [
      {
         name: 'chant',
@@ -391,7 +343,6 @@ const commands = [
     {
         name: 'logpractice',
         description: 'Log your daily spiritual practices using a form.',
-        // No options defined here, the modal handles input
     },
     {
         name: 'weeklysummary',
@@ -466,7 +417,7 @@ const commands = [
     },
      {
         name: 'help',
-        description: 'Provides information about the bot commands.', // Updated description
+        description: 'Provides information about the bot commands.',
     },
     {
         name: 'checkdata',
@@ -478,7 +429,7 @@ const commands = [
                 description: 'Type of data to check',
                 required: true,
                 choices: [
-                    { name: 'User Log by Date', value: 'user_sadhana_log_by_date' }, // Corrected value to match case
+                    { name: 'User Log by Date', value: 'user_sadhana_log_by_date' },
                     { name: 'User Streak', value: 'user_streak' },
                     { name: 'Total Sadhana Entries Count', value: 'total_sadhana_count' },
                     { name: 'Total User Streak Entries Count', value: 'total_streak_count' },
@@ -519,7 +470,7 @@ const commands = [
         default_member_permissions: PermissionsBitField.Flags.Administrator.toString(),
     },
      {
-        name: 'streakboard', // Renamed from streaklog
+        name: 'streakboard',
         description: 'Shows the current chanting streak leaderboard.',
     },
 ];
@@ -553,14 +504,6 @@ const dateInput = new TextInputBuilder()
     .setRequired(true)
     .setPlaceholder('e.g., 07/05/2025');
 
-// Waking Time and Sleeping Time are removed from this modal to fit within the 5-row limit.
-// const wakingTimeInput = new TextInputBuilder()
-//     .setCustomId('wakingTimeInput')
-//     .setLabel('Waking Time (h:mm AM/PM or "Not Slept")')
-//     .setStyle(TextInputStyle.Short)
-//     .setRequired(true)
-//     .setPlaceholder('e.g., 4:30 AM or Not Slept');
-
 const japaRoundsInput = new TextInputBuilder()
     .setCustomId('japaRoundsInput')
     .setLabel('Japa Rounds Chanted')
@@ -568,7 +511,6 @@ const japaRoundsInput = new TextInputBuilder()
     .setRequired(true)
     .setPlaceholder('e.g., 16');
 
-// Study Hours is now included in the modal
 const studyHoursInput = new TextInputBuilder()
     .setCustomId('studyHoursInput')
     .setLabel('Study Hours')
@@ -579,7 +521,7 @@ const studyHoursInput = new TextInputBuilder()
 const readingDetailsInput = new TextInputBuilder()
     .setCustomId('readingDetailsInput')
     .setLabel('Reading Details (What you read and how much)')
-    .setStyle(TextInputStyle.Paragraph) // Use Paragraph for longer text
+    .setStyle(TextInputStyle.Paragraph)
     .setRequired(true)
     .setPlaceholder('e.g., Bhagavad Gita Ch 2, 10 pages');
 
@@ -590,38 +532,14 @@ const listeningHoursInput = new TextInputBuilder()
     .setRequired(true)
     .setPlaceholder('e.g., 0.75');
 
-// Sleeping Time is removed from this modal to fit within the 5-row limit.
-// const sleepingTimeInput = new TextInputBuilder()
-//     .setCustomId('sleepingTimeInput')
-//     .setLabel('Sleeping Time (h:mm AM/PM or "Not Slept")')
-//     .setStyle(TextInputInputStyle.Short)
-//     .setRequired(true)
-//     .setPlaceholder('e.g., 10:30 PM or Not Slept');
-
-// Regulative Principles input is removed from this modal.
-// const regulativePrinciplesInput = new TextInputBuilder()
-//     .setCustomId('regulativePrinciplesInput')
-//     .setLabel('Regulative Principles (Yes/No, comma sep)') // Shortened label
-//     .setStyle(TextInputStyle.Short)
-//     .setRequired(true)
-//     .setPlaceholder('e.g., Yes, Yes, Yes, Yes (Meat, Gambling, Sex, Intoxication)');
-
-// Additional Service input is removed from the modal to fit within the 5-row limit.
-// const additionalServiceInput = new TextInputBuilder()
-//     .setCustomId('additionalServiceInput')
-//     .setLabel('Additional Service (Optional)')
-//     .setStyle(TextInputStyle.Paragraph)
-//     .setRequired(false) // This is optional
-    // .setPlaceholder('e.g., Distributed flyers, Cleaned temple');
-
 
 // Add inputs to the modal, grouping them into 5 Action Rows, one input per row for short inputs.
 logPracticeModal.addComponents(
-    { type: 1, components: [dateInput] }, // Row 1: Date (Short)
-    { type: 1, components: [japaRoundsInput] }, // Row 2: Japa Rounds (Short)
-    { type: 1, components: [studyHoursInput] }, // Row 3: Study Hours (Short)
-    { type: 1, components: [listeningHoursInput] }, // Row 4: Listening Hours (Short)
-    { type: 1, components: [readingDetailsInput] } // Row 5: Reading Details (Paragraph)
+    { type: 1, components: [dateInput] },
+    { type: 1, components: [japaRoundsInput] },
+    { type: 1, components: [studyHoursInput] },
+    { type: 1, components: [listeningHoursInput] },
+    { type: 1, components: [readingDetailsInput] }
 );
 
 
@@ -691,8 +609,6 @@ client.once('ready', () => {
     // --- Schedule Cron Jobs ---
 
     // Schedule daily streak warning DM (e.g., at 10:00 PM IST)
-    // Cron format: minute hour day-of-month month day-of-week
-    // Example: '0 22 * * *' runs at 22:00 (10:00 PM) every day
     cron.schedule('0 22 * * *', async () => {
         console.log(`[${new Date().toISOString()}] Running daily streak warning job.`);
         try {
@@ -708,7 +624,7 @@ client.once('ready', () => {
             // Fetch all users with a streak > 0
             const usersWithStreaks = await UserStreak.findAll({
                 where: {
-                    streakCount: { [Op.gt]: 0 } // Use Op.gt for > operator
+                    streakCount: { [Op.gt]: 0 }
                 }
             });
 
@@ -721,10 +637,9 @@ client.once('ready', () => {
                 const todayLog = await Sadhana.findOne({
                     where: {
                         userId: userId,
-                         // Check for logs within the IST day
                         date: {
-                            [Op.gte]: startOfDay(toZonedTime(now, IST_TIMEZONE)), // Greater than or equal to the start of today IST
-                            [Op.lte]: endOfDay(toZonedTime(now, IST_TIMEZONE))   // Less than or equal to the end of today IST
+                            [Op.gte]: startOfDay(toZonedTime(now, IST_TIMEZONE)),
+                            [Op.lte]: endOfDay(toZonedTime(now, IST_TIMEZONE))
                         }
                     }
                 });
@@ -738,7 +653,7 @@ client.once('ready', () => {
                             const nowIST = toZonedTime(new Date(), IST_TIMEZONE);
                             const timeRemainingMs = differenceInMilliseconds(cutoffTimeTodayIST, nowIST);
 
-                            if (timeRemainingMs > 0) { // Only send if there's time remaining today
+                            if (timeRemainingMs > 0) {
                                 const hours = Math.floor(timeRemainingMs / (1000 * 60 * 60));
                                 const minutes = Math.floor((timeRemainingMs % (1000 * 60 * 60)) / (1000 * 60));
 
@@ -746,7 +661,7 @@ client.once('ready', () => {
                                 const timeRemainingMessage = `You have about ${hours} hours and ${minutes} minutes remaining to log your rounds using \`/chant <rounds>\` or log your full practice using \`/logpractice\`. Don't miss your streak!`;
 
                                 const embed = new EmbedBuilder()
-                                    .setColor('#FFCC00') // Yellow/Orange color for warning
+                                    .setColor('#FFCC00')
                                     .setTitle('Streak Warning!')
                                     .setDescription(`${warningMessage}\n${timeRemainingMessage}`);
 
@@ -760,7 +675,6 @@ client.once('ready', () => {
                         }
                     } catch (dmError) {
                         console.error(`[${new Date().toISOString()}] Failed to send streak warning DM to user ${userId}:`, dmError);
-                        // This error might occur if the user has DMs disabled
                     }
                 } else {
                     console.log(`[${new Date().toISOString()}] User ${userId} has already logged today. No streak warning needed.`);
@@ -772,11 +686,10 @@ client.once('ready', () => {
         }
     }, {
         scheduled: true,
-        timezone: IST_TIMEZONE // Ensure the cron job runs based on IST
+        timezone: IST_TIMEZONE
     });
 
     // Schedule daily announcement message (e.g., at 8:00 AM IST)
-    // Example: '0 8 * * *' runs at 8:00 AM every day
     cron.schedule('0 8 * * *', async () => {
         console.log(`[${new Date().toISOString()}] Running daily announcement job.`);
         if (!announcementChannelId) {
@@ -788,21 +701,14 @@ client.once('ready', () => {
             const channel = await client.channels.fetch(announcementChannelId);
             if (channel && channel.isTextBased()) {
                 const embed = new EmbedBuilder()
-                    .setColor('#0099FF') // Blue color
+                    .setColor('#0099FF')
                     .setTitle('Daily Practice Reminder!')
                     .setDescription(`Hare Krishna! 🙏 Remember to log your spiritual practices for today.\n\n`
                                   + `Quickly log your japa rounds using \`/chant <rounds>\`.\n`
                                   + `Log your full practice details using \`/logpractice\`.`);
 
-                // Use channel.send to send the message
-                // To mention everyone, you would add allowedMentions and content: '@everyone'
-                // However, mentioning @everyone frequently can be disruptive.
-                // A better approach might be to mention a specific role or just send the message without a mass mention.
-                // For now, sending without @everyone mention. If you need @everyone, uncomment the content and allowedMentions lines.
                 await channel.send({
-                    // content: '@everyone', // Uncomment this line to mention everyone (requires bot permissions)
                     embeds: [embed],
-                    // allowedMentions: { parse: ['everyone'] } // Uncomment this line if mentioning everyone
                 });
                 console.log(`[${new Date().toISOString()}] Sent daily announcement to channel ${announcementChannelId}`);
 
@@ -814,14 +720,15 @@ client.once('ready', () => {
         }
     }, {
         scheduled: true,
-        timezone: IST_TIMEZONE // Ensure the cron job runs based on IST
+        timezone: IST_TIMEZONE
     });
 
 
 });
 
 client.on('interactionCreate', async interaction => {
-    console.log(`[${new Date().toISOString()}] Interaction received: ${interaction.id}, Type: ${interaction.type}, Command: ${interaction.isCommand() ? interaction.commandName : 'N/A'}, Modal: ${interaction.isModalSubmit() ? interaction.customId : 'N/A'}, Button: ${interaction.isButton() ? interaction.customId : 'N/A'}`);
+    // Added process.pid for better debugging in multi-instance environments
+    console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Interaction received: ${interaction.id}, Type: ${interaction.type}, Command: ${interaction.isCommand() ? interaction.commandName : 'N/A'}, Modal: ${interaction.isModalSubmit() ? interaction.customId : 'N/A'}, Button: ${interaction.isButton() ? interaction.customId : 'N/A'}`);
 
     // --- Handle Slash Command Interactions ---
     if (interaction.isCommand()) {
@@ -829,22 +736,22 @@ client.on('interactionCreate', async interaction => {
 
         // --- Handle /chant command ---
         if (commandName === 'chant') {
-            console.log(`[${new Date().toISOString()}] Handling /chant command for user ${interaction.user.tag}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /chant command for user ${interaction.user.tag}`);
             // Defer the reply immediately
             try {
                 await interaction.deferReply();
-                console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
             } catch (deferError) {
-                 console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for interaction ${interaction.id}:`, deferError);
                  return;
             }
-            console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
             const rounds = interaction.options.getInteger('rounds');
             const userId = interaction.user.id;
             const guildId = interaction.guild?.id;
             const now = new Date();
-            const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE)); // Get start of today in IST
+            const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE));
 
             if (rounds < 0) {
                  const embed = new EmbedBuilder()
@@ -856,27 +763,23 @@ client.on('interactionCreate', async interaction => {
             }
 
             // --- Database Interaction for /chant (Sadhana Log part) ---
-            // This part logs the japa rounds in the Sadhana table.
             let sadhanaEntry;
             let created;
-            console.log(`[${new Date().toISOString()}] Starting database findOrCreate for Sadhana log (/chant) for user ${userId} on ${format(todayIST, 'yyyy-MM-dd')}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database findOrCreate for Sadhana log (/chant) for user ${userId} on ${format(todayIST, 'yyyy-MM-dd')}`);
             try {
-                 // Find or create a Sadhana entry for today for this user
                  [sadhanaEntry, created] = await Sadhana.findOrCreate({
                     where: {
                         userId: userId,
-                         // Find entries within the IST day for today
                         date: {
-                             [Op.gte]: startOfDay(toZonedTime(now, IST_TIMEZONE)), // Greater than or equal to the start of today IST
-                             [Op.lte]: endOfDay(toZonedTime(now, IST_TIMEZONE))   // Less than or equal to the end of today IST
+                             [Op.gte]: startOfDay(toZonedTime(now, IST_TIMEZONE)),
+                             [Op.lte]: endOfDay(toZonedTime(now, IST_TIMEZONE))
                         }
                     },
                     defaults: {
                         userId: userId,
                         guildId: guildId,
-                        date: todayIST, // Store the start of the day in IST as the date
+                        date: todayIST,
                         japaRounds: rounds,
-                         // Set other fields to default values as they are not provided by /chant
                         studyHours: 0,
                         listeningHours: 0,
                         readingDetails: '',
@@ -889,12 +792,12 @@ client.on('interactionCreate', async interaction => {
                         noIllicitSex: false,
                         noIntoxication: false,
                         additionalService: '',
-                        score: 0, // Calculate score after updating
+                        score: 0,
                     }
                 });
-                 console.log(`[${new Date().toISOString()}] Finished database findOrCreate for Sadhana log (/chant). Created: ${created}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database findOrCreate for Sadhana log (/chant). Created: ${created}`);
             } catch (dbError) {
-                console.error(`Database error during findOrCreate for Sadhana log (/chant):`, dbError);
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during findOrCreate for Sadhana log (/chant):`, dbError);
                  const embed = new EmbedBuilder()
                      .setColor('#FF0000')
                      .setTitle('Chanting Log Failed')
@@ -905,19 +808,18 @@ client.on('interactionCreate', async interaction => {
 
             // If updating an existing Sadhana entry, add the new rounds to existing rounds
             if (!created) {
-                 // Ensure sadhanaEntry.japaRounds is a number before adding
                  sadhanaEntry.japaRounds = (sadhanaEntry.japaRounds || 0) + rounds;
             }
 
             // Recalculate and save the score for the Sadhana entry
-            sadhanaEntry.score = calculateScore(sadhanaEntry.toJSON()); // Pass plain object to calculateScore
+            sadhanaEntry.score = calculateScore(sadhanaEntry.toJSON());
 
-            console.log(`[${new Date().toISOString()}] Starting database save for Sadhana log (/chant) for user ${userId} on ${format(todayIST, 'yyyy-MM-dd')}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database save for Sadhana log (/chant) for user ${userId} on ${format(todayIST, 'yyyy-MM-dd')}`);
             try {
                 await sadhanaEntry.save();
-                 console.log(`[${new Date().toISOString()}] Finished database save for Sadhana log (/chant).`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database save for Sadhana log (/chant).`);
             } catch (dbError) {
-                console.error(`Database error during save for Sadhana log (/chant):`, dbError);
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during save for Sadhana log (/chant):`, dbError);
                  const embed = new EmbedBuilder()
                      .setColor('#FF0000')
                      .setTitle('Chanting Log Failed')
@@ -928,10 +830,9 @@ client.on('interactionCreate', async interaction => {
 
 
             // --- Chanting Streak Logic for /chant ---
-             // Find or create the user's streak entry in the UserStreak table
             let userStreak;
             let streakCreated;
-            console.log(`[${new Date().toISOString()}] Starting database findOrCreateAndUpdateUserStreak for streak (/chant) for user ${userId}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database findOrCreateAndUpdateUserStreak for streak (/chant) for user ${userId}`);
             try {
                  [userStreak, streakCreated] = await UserStreak.findOrCreate({
                     where: { userId: userId },
@@ -941,9 +842,9 @@ client.on('interactionCreate', async interaction => {
                         lastLoggedDateKey: null,
                     }
                 });
-                 console.log(`[${new Date().toISOString()}] Finished database findOrCreate for streak (/chant). Created: ${streakCreated}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database findOrCreate for streak (/chant). Created: ${streakCreated}`);
             } catch (dbError) {
-                 console.error(`Database error during findOrCreate for streak (/chant):`, dbError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during findOrCreate for streak (/chant):`, dbError);
                   const embed = new EmbedBuilder()
                       .setColor('#FF0000')
                       .setTitle('Chanting Log Failed')
@@ -967,36 +868,30 @@ client.on('interactionCreate', async interaction => {
                         newStreak = currentStreak + 1;
                     } else if (dayDifference > 1) {
                         newStreak = 1; // Reset streak
-                    } else if (dayDifference === 0 && format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
+                    } else if (dayDifference <= 0 && format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
                         newStreak = currentStreak;
                     }
                 } else {
                     newStreak = 1;
                 }
 
-                // Only update streak count and last logged date if the current log date is today or after the last logged date
-                // This prevents logging for past dates from incorrectly increasing the streak.
                 if (!lastLoggedDateKey || (lastLoggedDate && todayIST >= lastLoggedDate)) {
                      userStreak.streakCount = newStreak;
-                     userStreak.lastLoggedDateKey = format(todayIST, 'yyyy-MM-dd');
+                     userStreak.lastLoggedDateKey = format(todayIST, 'yyyy-MM-dd'); // Corrected format
                 }
 
 
             } else {
-                 console.error(`Invalid todayIST date for streak logic (/chant): ${todayIST}`);
-                 // In case of invalid date, do not update streak
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Invalid todayIST date for streak logic (/chant): ${todayIST}`);
             }
 
             // Save the updated user streak
-            console.log(`[${new Date().toISOString()}] Starting database save for streak (/chant) for user ${userId}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database save for streak (/chant) for user ${userId}`);
             try {
                 await userStreak.save();
-                // Invalidate the cache after writing
-                invalidateStreakCache();
-                console.log(`[${new Date().toISOString()}] Streak cache invalidated after updating user ${userId}.`);
-                console.log(`[${new Date().toISOString()}] Finished database save for streak (/chant).`);
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database save for streak (/chant).`);
             } catch (dbError) {
-                console.error(`Database error during save for streak (/chant):`, dbError);
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during save for streak (/chant):`, dbError);
                  const embed = new EmbedBuilder()
                      .setColor('#FF0000')
                      .setTitle('Chanting Log Failed')
@@ -1008,24 +903,24 @@ client.on('interactionCreate', async interaction => {
 
             // --- Create an embed response message for /chant ---
             const embed = new EmbedBuilder()
-                .setColor('#00FF00') // Green color
+                .setColor('#00FF00')
                 .setTitle('Japa Rounds Logged!')
                 .setDescription(`You logged **${rounds}** rounds for today (${format(todayIST, 'dd/MM/yyyy')}).`)
                 .addFields(
                      { name: 'Current Chanting Streak', value: `${userStreak.streakCount} day(s) 🙏}`, inline: true }
                 );
 
-            console.log(`[${new Date().toISOString()}] Attempting to editReply for /chant command for user ${userId}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /chant command for user ${userId}`);
             try {
                  await interaction.editReply({ embeds: [embed] });
-                 console.log(`[${new Date().toISOString()}] Successfully edited reply for /chant command for user ${userId}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for /chant command for user ${userId}`);
             } catch (editError) {
-                 console.error(`[${new Date().toISOString()}] Error editing reply with embed for /chant command for user ${userId}:`, editError);
-                 // Add a fallback message if editing the reply fails
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply with embed for /chant command for user ${userId}:`, editError);
                  try {
+                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError); // Log full error
                      await interaction.followUp({ content: 'Successfully logged your chanting, but failed to update the original message.', ephemeral: true });
                  } catch (followUpError) {
-                     console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
                  }
             }
 
@@ -1033,13 +928,12 @@ client.on('interactionCreate', async interaction => {
         }
         // --- Handle /logpractice command ---
         else if (commandName === 'logpractice') {
-            console.log(`[${new Date().toISOString()}] Handling /logpractice command for user ${interaction.user.tag}`);
-            // Show the modal to the user
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /logpractice command for user ${interaction.user.tag}`);
             try {
                  await interaction.showModal(logPracticeModal);
-                 console.log(`[${new Date().toISOString()}] Successfully showed logPracticeModal to user ${interaction.user.tag}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully showed logPracticeModal to user ${interaction.user.tag}`);
             } catch (modalError) {
-                 console.error(`[${new Date().toISOString()}] Error showing logPracticeModal to user ${interaction.user.tag}:`, modalError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error showing logPracticeModal to user ${interaction.user.tag}:`, modalError);
                  const embed = new EmbedBuilder()
                      .setColor('#FF0000')
                      .setTitle('Logging Failed')
@@ -1049,25 +943,22 @@ client.on('interactionCreate', async interaction => {
         }
         // --- Handle /weeklysummary command ---
         else if (commandName === 'weeklysummary') {
-             console.log(`[${new Date().toISOString()}] Handling /weeklysummary command for user ${interaction.user.tag}`);
-             // Defer the reply immediately
+             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /weeklysummary command for user ${interaction.user.tag}`);
              try {
                  await interaction.deferReply();
-                 console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
              } catch (deferError) {
-                  console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                  console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for interaction ${interaction.id}:`, deferError);
                   return;
              }
-             console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
              const userId = interaction.user.id;
              const now = new Date();
-             // Calculate the start of the last 7 days including today in IST
              const startDateIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE));
-             const endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE)); // End of today in IST
+             const endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE));
 
              try {
-                 // Fetch Sadhana logs for the user within the last 7 days
                  const logs = await Sadhana.findAll({
                      where: {
                          userId: userId,
@@ -1076,7 +967,7 @@ client.on('interactionCreate', async interaction => {
                              [Op.lte]: endDateIST
                          }
                      },
-                     order: [['date', 'ASC']] // Order by date
+                     order: [['date', 'ASC']]
                  });
 
                  let totalScore = 0;
@@ -1084,14 +975,14 @@ client.on('interactionCreate', async interaction => {
                  let japaRounds = 0;
                  let studyHours = 0;
                  let listeningHours = 0;
-                 let readingCount = 0; // Count days with reading details
+                 let readingCount = 0;
                  let wokeUpEarlyCount = 0;
                  let sleptEarlyCount = 0;
-                 let regulativePrinciplesCount = 0; // Count days with all 4 principles followed
-                 let additionalServiceCount = 0; // Count days with additional service
+                 let regulativePrinciplesCount = 0;
+                 let additionalServiceCount = 0;
 
                  for (const log of logs) {
-                     const logData = log.toJSON(); // Get plain object
+                     const logData = log.toJSON();
                      totalScore += calculateScore(logData);
                      loggedDays++;
                      japaRounds += logData.japaRounds || 0;
@@ -1101,7 +992,6 @@ client.on('interactionCreate', async interaction => {
                      if (logData.wokeUpEarlyStatus) wokeUpEarlyCount++;
                      if (logData.sleptEarlyStatus) sleptEarlyCount++;
 
-                     // Check if all 4 regulative principles were followed for the day
                      if (logData.noMeatEating && logData.noGambling && logData.noIllicitSex && logData.noIntoxication) {
                          regulativePrinciplesCount++;
                      }
@@ -1110,7 +1000,7 @@ client.on('interactionCreate', async interaction => {
                  }
 
                  const embed = new EmbedBuilder()
-                     .setColor('#3498DB') // Blue color
+                     .setColor('#3498DB')
                      .setTitle(`Weekly Practice Summary for ${interaction.user.username}`)
                      .setDescription(`Summary for the period: ${format(startDateIST, 'dd/MM/yyyy')} - ${format(endDateIST, 'dd/MM/yyyy')}`)
                      .addFields(
@@ -1127,22 +1017,22 @@ client.on('interactionCreate', async interaction => {
                      )
                      .setFooter({ text: 'Based on your logged practices.' });
 
-                 console.log(`[${new Date().toISOString()}] Attempting to editReply for /weeklysummary command for user ${userId}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /weeklysummary command for user ${userId}`);
                  try {
                       await interaction.editReply({ embeds: [embed] });
-                      console.log(`[${new Date().toISOString()}] Successfully edited reply for /weeklysummary command for user ${userId}`);
+                      console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for /weeklysummary command for user ${userId}`);
                  } catch (editError) {
-                      console.error(`[${new Date().toISOString()}] Error editing reply with embed for /weeklysummary command for user ${userId}:`, editError);
-                      // Add fallback
-                      try {
-                          await interaction.followUp({ content: 'Successfully generated summary, but failed to update the original message.', ephemeral: true });
-                      } catch (followUpError) {
-                          console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
-                      }
+                      console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply with embed for /weeklysummary command for user ${userId}:`, editError);
+                       try {
+                           console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
+                           await interaction.followUp({ content: 'Successfully generated summary, but failed to update the original message.', ephemeral: true });
+                       } catch (followUpError) {
+                           console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
+                       }
                  }
 
              } catch (error) {
-                  console.error(`[${new Date().toISOString()}] Error during /weeklysummary command for user ${userId}:`, error);
+                  console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error during /weeklysummary command for user ${userId}:`, error);
                   const embed = new EmbedBuilder()
                       .setColor('#FF0000')
                       .setTitle('Weekly Summary Failed')
@@ -1152,25 +1042,22 @@ client.on('interactionCreate', async interaction => {
         }
         // --- Handle /monthlysummary command ---
         else if (commandName === 'monthlysummary') {
-             console.log(`[${new Date().toISOString()}] Handling /monthlysummary command for user ${interaction.user.tag}`);
-             // Defer the reply immediately
+             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /monthlysummary command for user ${interaction.user.tag}`);
              try {
                  await interaction.deferReply();
-                 console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
              } catch (deferError) {
-                  console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                  console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for interaction ${interaction.id}:`, deferError);
                   return;
              }
-             console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
              const userId = interaction.user.id;
              const now = new Date();
-             // Calculate the start of the current month in IST
              const startDateIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE));
-             const endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE)); // End of today in IST
+             const endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE));
 
              try {
-                 // Fetch Sadhana logs for the user within the current month
                  const logs = await Sadhana.findAll({
                      where: {
                          userId: userId,
@@ -1179,7 +1066,7 @@ client.on('interactionCreate', async interaction => {
                              [Op.lte]: endDateIST
                          }
                      },
-                     order: [['date', 'ASC']] // Order by date
+                     order: [['date', 'ASC']]
                  });
 
                  let totalScore = 0;
@@ -1187,14 +1074,14 @@ client.on('interactionCreate', async interaction => {
                  let japaRounds = 0;
                  let studyHours = 0;
                  let listeningHours = 0;
-                 let readingCount = 0; // Count days with reading details
+                 let readingCount = 0;
                  let wokeUpEarlyCount = 0;
                  let sleptEarlyCount = 0;
-                 let regulativePrinciplesCount = 0; // Count days with all 4 principles followed
-                 let additionalServiceCount = 0; // Count days with additional service
+                 let regulativePrinciplesCount = 0;
+                 let additionalServiceCount = 0;
 
                  for (const log of logs) {
-                     const logData = log.toJSON(); // Get plain object
+                     const logData = log.toJSON();
                      totalScore += calculateScore(logData);
                      loggedDays++;
                      japaRounds += logData.japaRounds || 0;
@@ -1204,7 +1091,6 @@ client.on('interactionCreate', async interaction => {
                      if (logData.wokeUpEarlyStatus) wokeUpEarlyCount++;
                      if (logData.sleptEarlyStatus) sleptEarlyCount++;
 
-                     // Check if all 4 regulative principles were followed for the day
                      if (logData.noMeatEating && logData.noGambling && logData.noIllicitSex && logData.noIntoxication) {
                          regulativePrinciplesCount++;
                      }
@@ -1213,7 +1099,7 @@ client.on('interactionCreate', async interaction => {
                  }
 
                  const embed = new EmbedBuilder()
-                     .setColor('#2ECC71') // Green color
+                     .setColor('#2ECC71')
                      .setTitle(`Monthly Practice Summary for ${interaction.user.username}`)
                      .setDescription(`Summary for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`)
                      .addFields(
@@ -1230,22 +1116,22 @@ client.on('interactionCreate', async interaction => {
                      )
                      .setFooter({ text: 'Based on your logged practices.' });
 
-                 console.log(`[${new Date().toISOString()}] Attempting to editReply for /monthlysummary command for user ${userId}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /monthlysummary command for user ${userId}`);
                  try {
                       await interaction.editReply({ embeds: [embed] });
-                      console.log(`[${new Date().toISOString()}] Successfully edited reply for /monthlysummary command for user ${userId}`);
+                      console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for /monthlysummary command for user ${userId}`);
                  } catch (editError) {
-                      console.error(`[${new Date().toISOString()}] Error editing reply with embed for /monthlysummary command for user ${userId}:`, editError);
-                       // Add fallback
+                      console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply with embed for /monthlysummary command for user ${userId}:`, editError);
                        try {
+                           console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
                            await interaction.followUp({ content: 'Successfully generated summary, but failed to update the original message.', ephemeral: true });
                        } catch (followUpError) {
-                           console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                           console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
                        }
                  }
 
              } catch (error) {
-                  console.error(`[${new Date().toISOString()}] Error during /monthlysummary command for user ${userId}:`, error);
+                  console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error during /monthlysummary command for user ${userId}:`, error);
                   const embed = new EmbedBuilder()
                       .setColor('#FF0000')
                       .setTitle('Monthly Summary Failed')
@@ -1255,30 +1141,29 @@ client.on('interactionCreate', async interaction => {
         }
         // --- Handle /leaderboard command ---
         else if (commandName === 'leaderboard') {
-            console.log(`[${new Date().toISOString()}] Handling /leaderboard command for user ${interaction.user.tag}`);
-            // Defer the reply immediately
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /leaderboard command for user ${interaction.user.tag}`);
             try {
                 await interaction.deferReply();
-                console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
             } catch (deferError) {
-                 console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for interaction ${interaction.id}:`, deferError);
                  return;
             }
-            console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
             const period = interaction.options.getString('period');
             const now = new Date();
             let startDateIST;
-            let endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE)); // End of today in IST
+            let endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE));
             let leaderboardTitle;
             let leaderboardDescription;
 
             if (period === 'weekly') {
-                startDateIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE)); // Start of the day 7 days ago
+                startDateIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE));
                 leaderboardTitle = 'Weekly Practice Leaderboard 🏆';
                 leaderboardDescription = `Top devotees based on scores from ${format(startDateIST, 'dd/MM/yyyy')} to ${format(endDateIST, 'dd/MM/yyyy')}`;
             } else if (period === 'monthly') {
-                startDateIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE)); // Start of the current month
+                startDateIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE));
                 leaderboardTitle = 'Monthly Practice Leaderboard 🏆';
                 leaderboardDescription = `Top devotees based on scores for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`;
             } else {
@@ -1291,7 +1176,6 @@ client.on('interactionCreate', async interaction => {
             }
 
             try {
-                // Fetch Sadhana logs within the specified period
                 const logs = await Sadhana.findAll({
                     where: {
                         date: {
@@ -1299,13 +1183,12 @@ client.on('interactionCreate', async interaction => {
                             [Op.lte]: endDateIST
                         }
                     },
-                    attributes: ['userId', 'japaRounds', 'studyHours', 'listeningHours', 'readingDetails', 'wokeUpEarlyStatus', 'sleptEarlyStatus', 'noMeatEating', 'noGambling', 'noIllicitSex', 'noIntoxication', 'additionalService'], // Fetch necessary attributes for score calculation
+                    attributes: ['userId', 'japaRounds', 'studyHours', 'listeningHours', 'readingDetails', 'wokeUpEarlyStatus', 'sleptEarlyStatus', 'noMeatEating', 'noGambling', 'noIllicitSex', 'noIntoxication', 'additionalService'],
                 });
 
-                // Aggregate scores by user
                 const userScores = {};
                 for (const log of logs) {
-                    const logData = log.toJSON(); // Get plain object
+                    const logData = log.toJSON();
                     const userId = logData.userId;
                     const score = calculateScore(logData);
 
@@ -1316,20 +1199,18 @@ client.on('interactionCreate', async interaction => {
                     userScores[userId].loggedDays++;
                 }
 
-                // Convert aggregated scores to an array and sort
                 const sortedLeaderboard = Object.keys(userScores)
                     .map(userId => ({ userId: userId, ...userScores[userId] }))
-                    .sort((a, b) => b.totalScore - a.totalScore); // Sort by total score descending
+                    .sort((a, b) => b.totalScore - a.totalScore);
 
                 const embed = new EmbedBuilder()
-                    .setColor('#FFD700') // Gold color
+                    .setColor('#FFD700')
                     .setTitle(leaderboardTitle)
                     .setDescription(leaderboardDescription);
 
                 if (sortedLeaderboard.length === 0) {
                     embed.addFields({ name: 'No Data', value: 'No practice logs found for this period.' });
                 } else {
-                    // Limit to top 10 for the leaderboard display
                     const topEntries = sortedLeaderboard.slice(0, 10);
                     let leaderboardText = '';
                     for (let i = 0; i < topEntries.length; i++) {
@@ -1338,10 +1219,10 @@ client.on('interactionCreate', async interaction => {
                          try {
                               if (interaction.guild) {
                                  const member = await interaction.guild.members.fetch(entry.userId);
-                                  username = member.user.globalName || member.user.username; // Prefer global name
+                                  username = member.user.globalName || member.user.username;
                               } else {
                                   const user = await client.users.fetch(entry.userId);
-                                  username = user.globalName || user.username; // Prefer global name
+                                  username = user.globalName || user.username;
                               }
                          } catch (err) {
                              console.warn(`Could not fetch user/member ${entry.userId} for leaderboard:`, err.message);
@@ -1352,22 +1233,22 @@ client.on('interactionCreate', async interaction => {
                     embed.addFields({ name: 'Rankings', value: leaderboardText });
                 }
 
-                console.log(`[${new Date().toISOString()}] Attempting to editReply for /leaderboard command`);
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /leaderboard command`);
                 try {
                      await interaction.editReply({ embeds: [embed] });
-                     console.log(`[${new Date().toISOString()}] Successfully edited reply for /leaderboard command`);
+                     console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for /leaderboard command`);
                  } catch (editError) {
-                      console.error(`[${new Date().toISOString()}] Error editing reply with embed for /leaderboard command:`, editError);
-                       // Add fallback
+                      console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply with embed for /leaderboard command:`, editError);
                        try {
+                           console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
                            await interaction.followUp({ content: 'Successfully generated leaderboard, but failed to update the original message.', ephemeral: true });
                        } catch (followUpError) {
-                           console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                           console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
                        }
                  }
 
             } catch (error) {
-                 console.error(`[${new Date().toISOString()}] Error during /leaderboard command:`, error);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error during /leaderboard command:`, error);
                  const embed = new EmbedBuilder()
                      .setColor('#FF0000')
                      .setTitle('Leaderboard Failed')
@@ -1377,31 +1258,30 @@ client.on('interactionCreate', async interaction => {
         }
         // --- Handle /myscore command ---
         else if (commandName === 'myscore') {
-             console.log(`[${new Date().toISOString()}] Handling /myscore command for user ${interaction.user.tag}`);
-             // Defer the reply immediately
+             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /myscore command for user ${interaction.user.tag}`);
              try {
                  await interaction.deferReply();
-                 console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
              } catch (deferError) {
-                  console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                  console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for interaction ${interaction.id}:`, deferError);
                   return;
              }
-             console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
              const period = interaction.options.getString('period');
              const userId = interaction.user.id;
              const now = new Date();
              let startDateIST;
-             let endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE)); // End of today in IST
+             let endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE));
              let scoreTitle;
              let scoreDescription;
 
              if (period === 'weekly') {
-                 startDateIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE)); // Start of the day 7 days ago
+                 startDateIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE));
                  scoreTitle = 'Your Weekly Practice Score';
                  scoreDescription = `Score for the period: ${format(startDateIST, 'dd/MM/yyyy')} - ${format(endDateIST, 'dd/MM/yyyy')}`;
              } else if (period === 'monthly') {
-                 startDateIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE)); // Start of the current month
+                 startDateIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE));
                  scoreTitle = 'Your Monthly Practice Score';
                  scoreDescription = `Score for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`;
              } else {
@@ -1414,7 +1294,6 @@ client.on('interactionCreate', async interaction => {
              }
 
              try {
-                 // Fetch Sadhana logs for the user within the specified period
                  const logs = await Sadhana.findAll({
                      where: {
                          userId: userId,
@@ -1423,18 +1302,18 @@ client.on('interactionCreate', async interaction => {
                              [Op.lte]: endDateIST
                          }
                      },
-                     attributes: ['japaRounds', 'studyHours', 'listeningHours', 'readingDetails', 'wokeUpEarlyStatus', 'sleptEarlyStatus', 'noMeatEating', 'noGambling', 'noIllicitSex', 'noIntoxication', 'additionalService'], // Fetch necessary attributes
+                     attributes: ['japaRounds', 'studyHours', 'listeningHours', 'readingDetails', 'wokeUpEarlyStatus', 'sleptEarlyStatus', 'noMeatEating', 'noGambling', 'noIllicitSex', 'noIntoxication', 'additionalService'],
                  });
 
                  let totalScore = 0;
                  let loggedDays = 0;
                  for (const log of logs) {
-                     totalScore += calculateScore(log.toJSON()); // Pass plain object
+                     totalScore += calculateScore(log.toJSON());
                      loggedDays++;
                  }
 
                  const embed = new EmbedBuilder()
-                     .setColor('#800080') // Purple color
+                     .setColor('#800080')
                      .setTitle(scoreTitle)
                      .setDescription(scoreDescription)
                      .addFields(
@@ -1443,22 +1322,22 @@ client.on('interactionCreate', async interaction => {
                      )
                      .setFooter({ text: 'Based on your logged practices.' });
 
-                 console.log(`[${new Date().toISOString()}] Attempting to editReply for /myscore command for user ${userId}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /myscore command for user ${userId}`);
                  try {
                       await interaction.editReply({ embeds: [embed] });
-                      console.log(`[${new Date().toISOString()}] Successfully edited reply for /myscore command for user ${userId}`);
+                      console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for /myscore command for user ${userId}`);
                   } catch (editError) {
-                       console.error(`[${new Date().toISOString()}] Error editing reply with embed for /myscore command for user ${userId}:`, editError);
-                        // Add fallback
+                       console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply with embed for /myscore command for user ${userId}:`, editError);
                         try {
+                            console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
                             await interaction.followUp({ content: 'Successfully generated your score summary, but failed to update the original message.', ephemeral: true });
                         } catch (followUpError) {
-                            console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                            console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
                         }
                   }
 
              } catch (error) {
-                  console.error(`[${new Date().toISOString()}] Error during /myscore command for user ${userId}:`, error);
+                  console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error during /myscore command for user ${userId}:`, error);
                   const embed = new EmbedBuilder()
                       .setColor('#FF0000')
                       .setTitle('My Score Failed')
@@ -1466,44 +1345,40 @@ client.on('interactionCreate', async interaction => {
                   await interaction.editReply({ embeds: [embed] });
              }
         }
-        // --- Handle /showscore command (Updated for database) ---
+        // --- Handle /showscore command ---
         else if (commandName === 'showscore') {
-            console.log(`[${new Date().toISOString()}] Handling /showscore command for user ${interaction.user.tag}`);
-            console.log(`[${new Date().toISOString()}] Attempting to defer reply for interaction ${interaction.id}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /showscore command for user ${interaction.user.tag}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to defer reply for interaction ${interaction.id}`);
             try {
                 await interaction.deferReply();
-                console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
             } catch (deferError) {
-                 console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for interaction ${interaction.id}:`, deferError);
                  return;
             }
-            console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
 
             const targetUser = interaction.options.getUser('user');
             const userId = targetUser.id;
-            const username = targetUser.globalName || targetUser.username; // Prefer global name
+            const username = targetUser.globalName || targetUser.username;
 
             try {
-                // --- Database Interaction: Get user's streak ---
                 const userStreak = await getUserStreak(userId);
                 const currentStreak = userStreak ? userStreak.streakCount : 0;
 
-                // --- Database Interaction: Calculate scores for weekly, monthly, all-time ---
-                // This requires fetching Sadhana logs for the user.
                 const now = new Date();
                 const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE));
 
-                // Calculate start dates for weekly and monthly periods in IST
-                const startOfLast7DaysIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE)); // Start of the day 7 days ago
-                const startOfMonthIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE)); // Start of the current month
+                const startOfLast7DaysIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE));
+                const startOfMonthIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE));
 
-                 console.log(`[${new Date().toISOString()}] Fetching Sadhana logs for user ${userId} for score calculation.`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Fetching Sadhana logs for user ${userId} for score calculation.`);
                 const allTimeLogs = await Sadhana.findAll({
                     where: { userId: userId },
-                    order: [['date', 'ASC']] // Order by date for streak calculation if needed later
+                    order: [['date', 'ASC']]
                 });
-                 console.log(`[${new Date().toISOString()}] Finished fetching Sadhana logs for user ${userId}. Found ${allTimeLogs.length} logs.`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished fetching Sadhana logs for user ${userId}. Found ${allTimeLogs.length} logs.`);
 
 
                 let weeklyScore = 0;
@@ -1513,34 +1388,29 @@ client.on('interactionCreate', async interaction => {
                 let monthlyLoggedDays = 0;
                 let allTimeLoggedDays = 0;
 
-                // Process logs to calculate scores for different periods
                 for (const log of allTimeLogs) {
-                    // Ensure log.date is treated as a Date object
                     const logDate = log.date instanceof Date ? log.date : new Date(log.date);
-                    const logDateIST = startOfDay(toZonedTime(logDate, IST_TIMEZONE)); // Get start of log date in IST
+                    const logDateIST = startOfDay(toZonedTime(logDate, IST_TIMEZONE));
 
-                    // All-Time Score
-                    allTimeScore += calculateScore(log.toJSON()); // Pass plain object
+                    allTimeScore += calculateScore(log.toJSON());
                     allTimeLoggedDays++;
 
-                    // Weekly Score (last 7 days including today)
+                    // Corrected typo from startOfLast77DaysIST to startOfLast7DaysIST
                     if (!isBefore(logDateIST, startOfLast7DaysIST)) {
-                        weeklyScore += calculateScore(log.toJSON()); // Pass plain object
+                        weeklyScore += calculateScore(log.toJSON());
                         weeklyLoggedDays++;
                     }
 
-                    // Monthly Score (current month)
                     if (!isBefore(logDateIST, startOfMonthIST)) {
-                         monthlyScore += calculateScore(log.toJSON()); // Pass plain object
+                         monthlyScore += calculateScore(log.toJSON());
                          monthlyLoggedDays++;
                     }
                 }
 
 
-                // Create an embed for showing user's score and streak
                 const embed = new EmbedBuilder()
-                    .setColor('#00CED1') // Dark Cyan color
-                    .setTitle(`Practice Summary for ${username}`) // Updated title
+                    .setColor('#00CED1')
+                    .setTitle(`Practice Summary for ${username}`)
                     .addFields(
                         { name: 'Current Chanting Streak', value: `${currentStreak} day(s) 🙏}` },
                         { name: 'Weekly (Last 7 Days)', value: `${weeklyScore.toFixed(2)} points (${weeklyLoggedDays} logged)`, inline: true },
@@ -1548,24 +1418,24 @@ client.on('interactionCreate', async interaction => {
                         { name: 'All-Time', value: `${allTimeScore.toFixed(2)} points (${allTimeLoggedDays} logged)`, inline: true }
                     );
 
-                console.log(`[${new Date().toISOString()}] Attempting to editReply for showscore for user ${userId}`);
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for showscore for user ${userId}`);
                 try {
                      await interaction.editReply({ embeds: [embed] });
-                     console.log(`[${new Date().toISOString()}] Successfully edited reply for showscore for user ${userId}`);
+                     console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for showscore for user ${userId}`);
                 } catch (editError) {
-                     console.error(`[${new Date().toISOString()}] Error editing reply for showscore for user ${userId}:`, editError);
-                      // Add fallback
+                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply for showscore for user ${userId}:`, editError);
                       try {
+                          console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
                           await interaction.followUp({ content: 'Successfully fetched user summary, but failed to update the original message.', ephemeral: true });
                       } catch (followUpError) {
-                          console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                          console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
                       }
                 }
             } catch (error) {
-                 console.error(`[${new Date().toISOString()}] Error during /showscore command for user ${userId}:`, error);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error during /showscore command for user ${userId}:`, error);
                   const embed = new EmbedBuilder()
                       .setColor('#FF0000')
-                      .setTitle('Show Score Failed') // Updated title
+                      .setTitle('Show Score Failed')
                       .setDescription(`An error occurred while fetching data: ${error.message}`);
                   await interaction.editReply({ embeds: [embed] });
             }
@@ -1574,24 +1444,22 @@ client.on('interactionCreate', async interaction => {
          // Handle the /streakset command (Admin only)
         else if (commandName === 'streakset') {
             if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
-                 // Reply with embed for insufficient permissions
                  const embed = new EmbedBuilder()
-                     .setColor('#FF0000') // Red color for error
+                     .setColor('#FF0000')
                      .setTitle('Permission Denied')
                      .setDescription('You do not have permission to use this command.');
                  await interaction.reply({ embeds: [embed] });
                 return;
             }
-            console.log(`[${new Date().toISOString()}] Handling /streakset command for user ${interaction.user.tag}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /streakset command for user ${interaction.user.tag}`);
 
 
             const targetUser = interaction.options.getUser('user');
             const newStreakValue = interaction.options.getInteger('streak');
 
             if (newStreakValue < 0) {
-                 // Reply with embed for invalid streak value
                  const embed = new EmbedBuilder()
-                     .setColor('#FF0000') // Red color for error
+                     .setColor('#FF0000')
                      .setTitle('Streak Set Failed')
                      .setDescription('Streak value cannot be negative.');
                  await interaction.reply({ embeds: [embed] });
@@ -1601,12 +1469,7 @@ client.on('interactionCreate', async interaction => {
             const targetUserId = targetUser.id;
 
             try {
-                // --- Database Interaction: Find or create and update the user's streak entry ---
-                 // This function calls getUserStreak and updateExistingUserStreak/addUserStreak (via Sequelize)
-                 // and will invalidate the cache upon successful WRITE.
                  const userStreak = await findOrCreateAndUpdateUserStreak(targetUserId, (currentUserStreak) => {
-                     // This logic sets the streak to the new value and the last logged date to yesterday
-                     // so the streak continues correctly on the next log.
                      const now = new Date();
                      const yesterday = addDays(now, -1);
                      const yesterdayKey = format(yesterday, 'yyyy-MM-dd');
@@ -1617,22 +1480,21 @@ client.on('interactionCreate', async interaction => {
                      };
                  });
 
-                // Create an embed for successful streak set
                 const embed = new EmbedBuilder()
-                    .setColor('#32CD32') // Lime Green color
+                    .setColor('#32CD32')
                     .setTitle('Streak Set Successfully')
                     .setDescription(`Successfully set ${targetUser.username}'s chanting streak to ${userStreak.streakCount}. Their last logged date is set for streak calculation.`);
 
-                console.log(`[${new Date().toISOString()}] Attempting to reply for streakset for user ${targetUserId}`);
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to reply for streakset for user ${targetUserId}`);
                 try {
                      await interaction.reply({ embeds: [embed] });
-                     console.log(`[${new Date().toISOString()}] Successfully replied for streakset for user ${targetUserId}`);
+                     console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully replied for streakset for user ${targetUserId}`);
                 } catch (replyError) {
-                     console.error(`[${new Date().toISOString()}] Error replying for streakset for user ${targetUserId}:`, replyError);
+                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error replying for streakset for user ${targetUserId}:`, replyError);
                 }
 
             } catch (error) {
-                 console.error(`[${new Date().toISOString()}] Error during /streakset command for user ${targetUserId}:`, error);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error during /streakset command for user ${targetUserId}:`, error);
                   const embed = new EmbedBuilder()
                       .setColor('#FF0000')
                       .setTitle('Streak Set Failed')
@@ -1641,57 +1503,53 @@ client.on('interactionCreate', async interaction => {
             }
         }
         // Handle the /help command
-        // Updated description to reflect available commands
         else if (commandName === 'help') {
-            console.log(`[${new Date().toISOString()}] Handling /help command for user ${interaction.user.tag}`);
-            const youtubeLink = 'Yet to be uploaded'; // Replace with your actual YouTube link
-            // Create an embed for the help command
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /help command for user ${interaction.user.tag}`);
+            const youtubeLink = 'Yet to be uploaded';
             const embed = new EmbedBuilder()
-                .setColor('#FFFF00') // Yellow color
-                .setTitle('Helpful Resources and Commands') // Updated title
-                .setDescription(`Here are the available commands:\n\n` // Updated description format
+                .setColor('#FFFF00')
+                .setTitle('Helpful Resources and Commands')
+                .setDescription(`Here are the available commands:\n\n`
                               + `- \`/chant <rounds>\`: Quickly log your japa rounds for today and update your chanting streak.\n`
                               + `- \`/logpractice\`: Open a form to log your full daily practice details.\n`
                               + `- \`/weeklysummary\`: Shows your practice summary for the last 7 days.\n`
                               + `- \`/monthlysummary\`: Shows your practice summary for the current month.\n`
                               + `- \`/leaderboard <period>\`: Shows the top devotees based on practice scores (weekly or monthly).\n`
                               + `- \`/myscore <period>\`: Shows your personal practice score for a specific period (weekly or monthly).\n`
-                              + `- \`/showscore <user>\`: Shows a user\'s chanting streak and practice scores.\n` // Updated description
-                              + `- \`/streakboard\`: Shows the current chanting streak leaderboard with pagination.\n` // Updated command name and description
+                              + `- \`/showscore <user>\`: Shows a user\'s chanting streak and practice scores.\n`
+                              + `- \`/streakboard\`: Shows the current chanting streak leaderboard with pagination.\n`
                               + `- \`/streakset <user> <streak>\`: Sets a user\'s chanting streak (Admin only).\n`
-                              + `- \`/checkdata <type> [user] [date_string]\`: Check specific data from the database (Admin only).`); // Updated description and options
+                              + `- \`/checkdata <type> [user] [date_string]\`: Check specific data from the database (Admin only).`);
 
-            console.log(`[${new Date().toISOString()}] Attempting to reply for help command for user ${interaction.user.tag}`);
-            // Reply with embed
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to reply for help command for user ${interaction.user.tag}`);
             try {
                  await interaction.reply({ embeds: [embed] });
-                 console.log(`[${new Date().toISOString()}] Successfully replied for help command for user ${interaction.user.tag}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully replied for help command for user ${interaction.user.tag}`);
             } catch (replyError) {
-                 console.error(`[${new Date().toISOString()}] Error replying for help command for user ${interaction.user.tag}:`, replyError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error replying for help command for user ${interaction.user.tag}:`, replyError);
             }
         }
-        // --- Handle /checkdata command (Updated for database) ---
+        // --- Handle /checkdata command ---
         else if (commandName === 'checkdata') {
             if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
-                 // Reply with embed for insufficient permissions
                  const embed = new EmbedBuilder()
-                     .setColor('#FF0000') // Red color for error
+                     .setColor('#FF0000')
                      .setTitle('Permission Denied')
                      .setDescription('You do not have permission to use this command.');
                  await interaction.reply({ embeds: [embed] });
                 return;
             }
-            console.log(`[${new Date().toISOString()}] Handling /checkdata command for user ${interaction.user.tag}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /checkdata command for user ${interaction.user.tag}`);
 
-            console.log(`[${new Date().toISOString()}] Attempting to defer reply for interaction ${interaction.id}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to defer reply for interaction ${interaction.id}`);
             try {
                 await interaction.deferReply();
-                console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
             } catch (deferError) {
-                 console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for interaction ${interaction.id}:`, deferError);
                  return;
             }
-            console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
 
             const dataType = interaction.options.getString('type');
@@ -1699,29 +1557,26 @@ client.on('interactionCreate', async interaction => {
             const dateString = interaction.options.getString('date_string');
 
 
-            // Create an embed for the checkdata results
             const embed = new EmbedBuilder()
-                 .setColor('#800080') // Purple color
+                 .setColor('#800080')
                 .setTitle('Data Check Results');
 
-            let embedDescription = ''; // Use description or fields for results
+            let embedDescription = '';
 
             try {
                 switch (dataType) {
                     case 'user_streak':
                         if (!targetUser) {
                              embedDescription = 'For "User Streak", you must provide a user.';
-                             embed.setColor('#FF0000'); // Change color for error
+                             embed.setColor('#FF0000');
                              embed.setDescription(embedDescription);
                              await interaction.editReply({ embeds: [embed] });
                             return;
                         }
-                        // --- Database Interaction: Get user's streak ---
                         const userStreak = await getUserStreak(targetUser.id);
 
                         if (userStreak) {
                             embed.setTitle(`Streak for ${targetUser.username}`);
-                            // Access properties directly from the streak object
                             embed.addFields(
                                 { name: 'Current Streak', value: `${userStreak.streakCount} day(s)` },
                                 { name: 'Last Logged Date Key', value: userStreak.lastLoggedDateKey || 'None' }
@@ -1733,7 +1588,6 @@ client.on('interactionCreate', async interaction => {
                         break;
 
                     case 'total_streak_count':
-                        // --- Database Interaction: Get total streak count ---
                         const totalStreakCount = await getTotalUserStreakCount();
                         embedDescription = `**Total User Streak Entries in Database:** ${totalStreakCount}`;
                         embed.setDescription(embedDescription);
@@ -1750,7 +1604,7 @@ client.on('interactionCreate', async interaction => {
 
                         const parsedDate = parse(dateString, 'yyyy-MM-dd', new Date());
                          if (isNaN(parsedDate.getTime())) {
-                             embedDescription = 'Invalid date string format. Please use YYYY-MM-DD.';
+                             embedDescription = 'Invalid date string format. Please use `YYYY-MM-DD`.';
                              embed.setColor('#FF0000');
                              embed.setDescription(embedDescription);
                              await interaction.editReply({ embeds: [embed] });
@@ -1759,11 +1613,10 @@ client.on('interactionCreate', async interaction => {
 
                         const targetDateIST = startOfDay(toZonedTime(parsedDate, IST_TIMEZONE));
 
-                         console.log(`[${new Date().toISOString()}] Fetching Sadhana log for user ${targetUser.id} on date ${dateString} from database.`);
+                         console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Fetching Sadhana log for user ${targetUser.id} on date ${dateString} from database.`);
                         const sadhanaLog = await Sadhana.findOne({
                              where: {
                                  userId: targetUser.id,
-                                 // Find entries within the IST day for the target date
                                  date: {
                                      [Op.gte]: startOfDay(toZonedTime(parsedDate, IST_TIMEZONE)),
                                      [Op.lte]: endOfDay(toZonedTime(parsedDate, IST_TIMEZONE))
@@ -1798,70 +1651,67 @@ client.on('interactionCreate', async interaction => {
 
                     default:
                         embedDescription = 'Invalid data type specified.';
-                        embed.setColor('#FF0000'); // Change color for error
+                        embed.setColor('#FF0000');
                         embed.setDescription(embedDescription);
                         break;
                 }
             } catch (error) {
-                console.error(`[${new Date().toISOString()}] An unexpected error occurred in /checkdata command:`, error);
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] An unexpected error occurred in /checkdata command:`, error);
                 embedDescription = `An unexpected error occurred while fetching data: ${error.message}`;
-                embed.setColor('#FF0000'); // Change color for error
+                embed.setColor('#FF0000');
                 embed.setDescription(embedDescription);
             }
 
-            console.log(`[${new Date().toISOString()}] Attempting to editReply for checkdata command`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for checkdata command`);
             try {
                  await interaction.editReply({ embeds: [embed] });
-                 console.log(`[${new Date().toISOString()}] Successfully edited reply for checkdata command`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for checkdata command`);
             } catch (editError) {
-                 console.error(`[${new Date().toISOString()}] Error editing reply with embed for /checkdata command:`, editError);
-                  // Add fallback
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply with embed for /checkdata command:`, editError);
                   try {
+                      console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
                       await interaction.followUp({ content: 'Successfully fetched data, but failed to update the original message.', ephemeral: true });
                   } catch (followUpError) {
-                      console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                      console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
                   }
             }
 
         }
          // --- Handle /streakboard command ---
         else if (commandName === 'streakboard') {
-            console.log(`[${new Date().toISOString()}] Handling /streakboard command for user ${interaction.user.tag}`);
-            // Defer the reply immediately
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /streakboard command for user ${interaction.user.tag}`);
             try {
                 await interaction.deferReply();
-                console.log(`[${new Date().toISOString()}] Reply deferred successfully for interaction ${interaction.id}`);
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
             } catch (deferError) {
-                 console.error(`[${new Date().toISOString()}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for interaction ${interaction.id}:`, deferError);
                  return;
             }
-            console.log(`[${new Date().toISOString()}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
             try {
-                // --- Database Interaction: Fetch all streaks ---
                 const userStreaks = await getAllUserStreaks();
 
                 const totalPages = Math.ceil(userStreaks.length / ENTRIES_PER_PAGE);
                 const page = 0;
 
-                // Generate and send the initial page
                 const { embeds, components } = await generateStreakboardPage(userStreaks, page, totalPages, interaction);
 
-                console.log(`[${new Date().toISOString()}] Attempting to editReply for /streakboard command`);
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /streakboard command`);
                 try {
                      await interaction.editReply({ embeds: embeds, components: components });
-                     console.log(`[${new Date().toISOString()}] Successfully edited reply for /streakboard command`);
-                } catch (editError) {
-                     console.error(`[${new Date().toISOString()}] Error editing reply with embed for /streakboard command:`, editError);
-                      // Add fallback
-                      try {
-                          await interaction.followUp({ content: 'Successfully generated streakboard, but failed to update the original message.', ephemeral: true });
-                      } catch (followUpError) {
-                          console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
-                      }
-                }
+                     console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for /streakboard command`);
+                 } catch (editError) {
+                      console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply with embed for /streakboard command:`, editError);
+                       try {
+                           console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
+                           await interaction.followUp({ content: 'Successfully generated streakboard, but failed to update the original message.', ephemeral: true });
+                       } catch (followUpError) {
+                           console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
+                       }
+                 }
             } catch (error) {
-                 console.error(`[${new Date().toISOString()}] Error during /streakboard command:`, error);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error during /streakboard command:`, error);
                  const embed = new EmbedBuilder()
                      .setColor('#FF0000')
                      .setTitle('Streak Leaderboard Failed')
@@ -1872,40 +1722,32 @@ client.on('interactionCreate', async interaction => {
     }
 
     // --- Handle Modal Submit Interactions ---
-    // Note: If you want to re-implement the /logpractice modal, you would add
-    // an interaction.isModalSubmit() check here and handle the modal data.
-    // You would need to fetch or create a Sadhana entry and update its fields
-    // based on the modal inputs, then save it.
     else if (interaction.isModalSubmit()) {
-        console.log(`[${new Date().toISOString()}] Modal submission received: ${interaction.customId} for user ${interaction.user.tag}`);
+        console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Modal submission received: ${interaction.customId} for user ${interaction.user.tag}`);
         if (interaction.customId === 'logPracticeModal') {
-            console.log(`[${new Date().toISOString()}] Handling logPracticeModal submission for user ${interaction.user.tag}`);
-            // Defer the reply ephemerally so only the user sees the initial "Thinking..."
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling logPracticeModal submission for user ${interaction.user.tag}`);
             try {
                  await interaction.deferReply({ ephemeral: true });
-                 console.log(`[${new Date().toISOString()}] Reply deferred successfully (ephemeral) for modal submission ${interaction.id}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully (ephemeral) for modal submission ${interaction.id}`);
             } catch (deferError) {
-                 console.error(`[${new Date().toISOString()}] Error deferring reply for modal submission ${interaction.id}:`, deferError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for modal submission ${interaction.id}:`, deferError);
                  return;
             }
-            console.log(`[${new Date().toISOString()}] Deferral complete for modal submission ${interaction.id}. Proceeding with modal logic.`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for modal submission ${interaction.id}. Proceeding with modal logic.`);
 
 
             const userId = interaction.user.id;
             const guildId = interaction.guild?.id;
             const now = new Date();
-            const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE)); // Get start of today in IST
+            const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE));
 
-            // Get data from modal inputs
             const dateString = interaction.fields.getTextInputValue('dateInput');
             const japaRounds = parseInt(interaction.fields.getTextInputValue('japaRoundsInput'), 10) || 0;
             const studyHours = parseFloat(interaction.fields.getTextInputValue('studyHoursInput')) || 0;
             const listeningHours = parseFloat(interaction.fields.getTextInputValue('listeningHoursInput')) || 0;
             const readingDetails = interaction.fields.getTextInputValue('readingDetailsInput');
-            // Waking/Sleeping times, Regulative Principles, Additional Service removed from modal
 
 
-            // Parse the date input from the modal (dd/mm/yyyy)
             const parsedDate = parse(dateString, 'dd/MM/yyyy', new Date());
 
             if (isNaN(parsedDate.getTime())) {
@@ -1917,27 +1759,24 @@ client.on('interactionCreate', async interaction => {
                  return;
             }
 
-            // Get the start of the day in IST for the parsed date
             const logDateIST = startOfDay(toZonedTime(parsedDate, IST_TIMEZONE));
 
 
             // --- Database Interaction for Modal Submission ---
             let sadhanaEntry;
             let created;
-             console.log(`[${new Date().toISOString()}] Starting database findOrCreate for modal submission for user ${userId} on ${format(logDateIST, 'yyyy-MM-dd')}`);
+             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database findOrCreate for modal submission for user ${userId} on ${format(logDateIST, 'yyyy-MM-dd')}`);
             try {
-                // Find or create a Sadhana entry for the parsed date for this user
                  [sadhanaEntry, created] = await Sadhana.findOrCreate({
-                    where: { userId: userId, date: logDateIST }, // Use the parsed date IST
+                    where: { userId: userId, date: logDateIST },
                     defaults: {
                         userId: userId,
                         guildId: guildId,
-                        date: logDateIST, // Store the start of the day in IST
+                        date: logDateIST,
                         japaRounds: japaRounds,
                         studyHours: studyHours,
                         listeningHours: listeningHours,
                         readingDetails: readingDetails,
-                         // Set other fields to default values as they are not provided by this modal
                         wakingTime: null,
                         wokeUpEarlyStatus: false,
                         sleepingTime: null,
@@ -1947,12 +1786,12 @@ client.on('interactionCreate', async interaction => {
                         noIllicitSex: false,
                         noIntoxication: false,
                         additionalService: '',
-                        score: 0, // Calculate score after updating
+                        score: 0,
                     }
                 });
-                 console.log(`[${new Date().toISOString()}] Finished database findOrCreate for modal submission. Created: ${created}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database findOrCreate for modal submission. Created: ${created}`);
             } catch (dbError) {
-                 console.error(`Database error during findOrCreate for modal submission:`, dbError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during findOrCreate for modal submission:`, dbError);
                   const embed = new EmbedBuilder()
                       .setColor('#FF0000')
                       .setTitle('Logging Failed')
@@ -1961,24 +1800,21 @@ client.on('interactionCreate', async interaction => {
                  return;
             }
 
-            // If updating an existing entry, update the fields from the modal
             if (!created) {
                 sadhanaEntry.japaRounds = japaRounds;
                 sadhanaEntry.studyHours = studyHours;
                 sadhanaEntry.listeningHours = listeningHours;
                 sadhanaEntry.readingDetails = readingDetails;
-                // Note: Waking/Sleeping times, Regulative Principles, Additional Service are NOT updated by this modal
             }
 
-            // Recalculate and save the score
-            sadhanaEntry.score = calculateScore(sadhanaEntry.toJSON()); // Pass plain object to calculateScore
+            sadhanaEntry.score = calculateScore(sadhanaEntry.toJSON());
 
-             console.log(`[${new Date().toISOString()}] Starting database save for modal submission for user ${userId} on ${format(logDateIST, 'yyyy-MM-dd')}`);
+             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database save for modal submission for user ${userId} on ${format(logDateIST, 'yyyy-MM-dd')}`);
             try {
                 await sadhanaEntry.save();
-                 console.log(`[${new Date().toISOString()}] Finished database save for modal submission.`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database save for modal submission.`);
             } catch (dbError) {
-                 console.error(`Database error during save for modal submission:`, dbError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during save for modal submission:`, dbError);
                   const embed = new EmbedBuilder()
                       .setColor('#FF0000')
                       .setTitle('Logging Failed')
@@ -1988,9 +1824,8 @@ client.on('interactionCreate', async interaction => {
             }
 
             // --- Streak Logic for Modal Submission ---
-            // Update streak only if the log is for today
              if (format(logDateIST, 'yyyy-MM-dd') === format(todayIST, 'yyyy-MM-dd')) {
-                 console.log(`[${new Date().toISOString()}] Log date is today. Updating streak for user ${userId}.`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Log date is today. Updating streak for user ${userId}.`);
                  try {
                       const userStreak = await findOrCreateAndUpdateUserStreak(userId, (currentUserStreak) => {
                           let currentStreak = currentUserStreak ? currentUserStreak.streakCount : 0;
@@ -2006,80 +1841,69 @@ client.on('interactionCreate', async interaction => {
                                   if (dayDifference === 1) {
                                       newStreak = currentStreak + 1;
                                   } else if (dayDifference > 1) {
-                                      newStreak = 1; // Reset streak
-                                  } else if (dayDifference === 0 && format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
+                                      newStreak = 1;
+                                  } else if (dayDifference <= 0 && format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
                                       newStreak = currentStreak;
                                   }
                               } else {
                                   newStreak = 1;
                               }
 
-                              // Only update streak count and last logged date if the current log date is today or after the last logged date
                                if (!lastLoggedDateKey || (lastLoggedDate && todayIST >= lastLoggedDate)) {
-                                   // This logic is handled by findOrCreateAndUpdateUserStreak's internal save
-                                   // We just need to return the calculated new streak and date key
                                     return { newStreakCount: newStreak, newLastLoggedDateKey: format(todayIST, 'yyyy-MM-dd') };
                                } else {
-                                   // If logging for a past date, do not change the streak
                                     return { newStreakCount: currentStreak, newLastLoggedDateKey: lastLoggedDateKey };
                                }
 
 
                           } else {
-                               console.error(`Invalid todayIST date for streak logic (modal): ${todayIST}`);
-                               // In case of invalid date, return current streak details to avoid data loss
+                               console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Invalid todayIST date for streak logic (modal): ${todayIST}`);
                                return { newStreakCount: currentStreak, newLastLoggedDateKey: lastLoggedDateKey };
                           }
                       });
-                       console.log(`[${new Date().toISOString()}] Finished updating streak for user ${userId} from modal.`);
+                       console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished updating streak for user ${userId} from modal.`);
                  } catch (dbError) {
-                      console.error(`Database error during streak update (modal):`, dbError);
-                       // This error is already handled by findOrCreateAndUpdateUserStreak, but log here too
+                      console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during streak update (modal):`, dbError);
                  }
              } else {
-                 console.log(`[${new Date().toISOString()}] Log date (${format(logDateIST, 'yyyy-MM-dd')}) is not today. Skipping streak update for user ${userId}.`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Log date (${format(logDateIST, 'yyyy-MM-dd')}) is not today. Skipping streak update for user ${userId}.`);
              }
 
 
-            // Create an embed response message for the modal submission
             const embed = new EmbedBuilder()
-                .setColor('#00FF00') // Green color
+                .setColor('#00FF00')
                 .setTitle('Practice Logged Successfully!')
                 .setDescription(`Your practice for ${format(logDateIST, 'dd/MM/yyyy')} has been logged.`);
 
-            // Add fields based on the data logged
             embed.addFields(
                 { name: 'Japa Rounds', value: japaRounds.toString(), inline: true },
                 { name: 'Study Hours', value: studyHours.toFixed(2), inline: true },
                 { name: 'Listening Hours', value: listeningHours.toFixed(2), inline: true },
                 { name: 'Reading Details', value: readingDetails || 'None' },
-                { name: 'Calculated Score', value: sadhanaEntry.score.toFixed(2), inline: true } // Use the score from the saved entry
+                { name: 'Calculated Score', value: sadhanaEntry.score.toFixed(2), inline: true }
             );
 
-            console.log(`[${new Date().toISOString()}] Attempting to editReply for modal submission for user ${userId}`);
-            // Edit the deferred reply with the confirmation embed
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for modal submission for user ${userId}`);
             try {
                  await interaction.editReply({ embeds: [embed], ephemeral: true });
-                 console.log(`[${new Date().toISOString()}] Successfully edited reply for modal submission for user ${userId}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for modal submission for user ${userId}`);
             } catch (editError) {
-                 console.error(`[${new Date().toISOString()}] Error editing reply for modal submission for user ${userId}:`, editError);
-                 // Add fallback
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply for modal submission for user ${userId}:`, editError);
                  try {
+                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
                      await interaction.followUp({ content: 'Successfully logged your practice, but failed to update the original message.', ephemeral: true });
                  } catch (followUpError) {
-                     console.error(`[${new Date().toISOString()}] Failed to send follow-up message after editReply error:`, followUpError);
+                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
                  }
             }
 
 
         }
-        // Handle other modal submissions if you add more later
     }
 });
 
 
 // Start the database connection and sync models
-// Discord client login is moved inside the database connection success callback
 connectDB();
 
 
@@ -2089,11 +1913,9 @@ client.on('error', error => {
 });
 
 // Optional: Keep alive web server for hosting platforms
-// This remains the same.
 const express = require("express");
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.get("/", (req, res) => res.send("Bot is alive!"));
 app.listen(port, () => console.log(`Web server running on port ${port}`));
-
