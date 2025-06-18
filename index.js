@@ -286,7 +286,7 @@ const { Client, GatewayIntentBits, REST, Routes, PermissionsBitField, MessageFla
 
 // Using date-fns for robust date/time parsing and comparison
 // Make sure 'date-fns' is installed: npm install date-fns
-const { parse, differenceInCalendarDays, addDays, format, startOfDay, endOfDay, startOfMonth, setHours, setMinutes, setSeconds, isBefore, differenceInMilliseconds } = require('date-fns');
+const { parse, differenceInCalendarDays, addDays, format, startOfDay, endOfDay, startOfMonth, setHours, setMinutes, setSeconds, isBefore, differenceInMilliseconds, addHours } = require('date-fns'); // Added addHours
 
 // For timezone handling - Needed for accurate IST time comparisons
 // IMPORTANT: Make sure 'date-fns-tz' (v2 or later) is installed: npm install date-fns-tz
@@ -310,6 +310,8 @@ const IST_TIMEZONE = 'Asia/Kolkata'; // IANA timezone name for India Standard Ti
 // Define the daily cutoff time for logging practice (e.g., 11:59 PM IST)
 const DAILY_CUTOFF_HOUR_IST = 23; // 23 for 11 PM
 const DAILY_CUTOFF_MINUTE_IST = 59; // 59 for 59 minutes
+const GRACE_PERIOD_HOURS = 1; // 1 hour grace period for 7+ day streaks
+const MIN_STREAK_FOR_GRACE_PERIOD = 7; // Minimum streak count for grace period
 
 // Define how many entries per page for the streakboard
 const ENTRIES_PER_PAGE = 10;
@@ -321,7 +323,8 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildPresences,
-        GatewayIntentBits.DirectMessages, // Might need this for modals in DMs, though typically modals are guild-based
+        GatewayIntentBits.DirectMessages, // Needed for sending DMs
+        GatewayIntentBits.MessageContent, // Needed for reading command content if not using slash commands exclusively
     ],
 });
 
@@ -615,12 +618,6 @@ client.once('ready', () => {
             const now = new Date();
             const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE));
 
-            // Calculate the cutoff time for today in IST
-            let cutoffTimeTodayIST = setHours(setMinutes(setSeconds(todayIST, 0), DAILY_CUTOFF_MINUTE_IST), DAILY_CUTOFF_HOUR_IST);
-             // If the current time is past the cutoff time, the cutoff is for the *next* day.
-             // However, for the warning, we want to warn *before* today's cutoff.
-             // So, we just need today's cutoff time.
-
             // Fetch all users with a streak > 0
             const usersWithStreaks = await UserStreak.findAll({
                 where: {
@@ -632,6 +629,17 @@ client.once('ready', () => {
 
             for (const userStreak of usersWithStreaks) {
                 const userId = userStreak.userId;
+
+                // Determine cutoff time, applying grace period if streak is long enough
+                let cutoffTimeTodayIST = setHours(setMinutes(setSeconds(todayIST, 0), DAILY_CUTOFF_MINUTE_IST), DAILY_CUTOFF_HOUR_IST);
+                let isGracePeriodUser = false;
+
+                if (userStreak.streakCount >= MIN_STREAK_FOR_GRACE_PERIOD) {
+                    cutoffTimeTodayIST = addHours(cutoffTimeTodayIST, GRACE_PERIOD_HOURS);
+                    isGracePeriodUser = true;
+                    console.log(`[${new Date().toISOString()}] User ${userId} has streak ${userStreak.streakCount}, applying ${GRACE_PERIOD_HOURS} hour grace period. New cutoff: ${formatInTimeZone(cutoffTimeTodayIST, IST_TIMEZONE, 'hh:mm a zzz')}`);
+                }
+
 
                 // Check if the user has logged practice for today by looking for a Sadhana entry
                 const todayLog = await Sadhana.findOne({
@@ -649,7 +657,6 @@ client.once('ready', () => {
                     try {
                         const user = await client.users.fetch(userId);
                         if (user) {
-                            // Calculate remaining time until cutoff
                             const nowIST = toZonedTime(new Date(), IST_TIMEZONE);
                             const timeRemainingMs = differenceInMilliseconds(cutoffTimeTodayIST, nowIST);
 
@@ -657,16 +664,25 @@ client.once('ready', () => {
                                 const hours = Math.floor(timeRemainingMs / (1000 * 60 * 60));
                                 const minutes = Math.floor((timeRemainingMs % (1000 * 60 * 60)) / (1000 * 60));
 
-                                const warningMessage = `Hare Krishna! 🙏 Your chanting streak of ${userStreak.streakCount} day(s) is about to be lost! You haven't logged your practice for today yet.`;
-                                const timeRemainingMessage = `You have about ${hours} hours and ${minutes} minutes remaining to log your rounds using \`/chant <rounds>\` or log your full practice using \`/logpractice\`. Don't miss your streak!`;
+                                let warningMessage = `Hare Krishna! 🙏 Your chanting streak of ${userStreak.streakCount} day(s) is about to be lost! You haven't logged your practice for today yet.`;
+                                let timeRemainingMessage = `You have about ${hours} hours and ${minutes} minutes remaining to log your rounds using \`/chant <rounds>\` or log your full practice using \`/logpractice\`. Don't miss your streak!`;
+
+                                let embedTitle = 'Streak Warning!';
+                                let embedColor = '#FFCC00'; // Yellow/Orange
+
+                                if (isGracePeriodUser) {
+                                    warningMessage += `\n\n**Special Grace Period!** You have an extra ${GRACE_PERIOD_HOURS} hour grace period because of your ${userStreak.streakCount} day streak!`;
+                                    embedTitle = 'Streak Grace Period Active!';
+                                    embedColor = '#ADD8E6'; // Light Blue
+                                }
 
                                 const embed = new EmbedBuilder()
-                                    .setColor('#FFCC00')
-                                    .setTitle('Streak Warning!')
+                                    .setColor(embedColor)
+                                    .setTitle(embedTitle)
                                     .setDescription(`${warningMessage}\n${timeRemainingMessage}`);
 
                                 await user.send({ embeds: [embed] });
-                                console.log(`[${new Date().toISOString()}] Sent streak warning DM to user ${userId}`);
+                                console.log(`[${new Date().toISOString()}] Sent streak warning DM to user ${userId}${isGracePeriodUser ? ' (with grace period)' : ''}.`);
                             } else {
                                 console.log(`[${new Date().toISOString()}] Skipping streak warning DM for user ${userId} as cutoff time has passed.`);
                             }
@@ -1395,7 +1411,6 @@ client.on('interactionCreate', async interaction => {
                     allTimeScore += calculateScore(log.toJSON());
                     allTimeLoggedDays++;
 
-                    // Corrected typo from startOfLast77DaysIST to startOfLast7DaysIST
                     if (!isBefore(logDateIST, startOfLast7DaysIST)) {
                         weeklyScore += calculateScore(log.toJSON());
                         weeklyLoggedDays++;
