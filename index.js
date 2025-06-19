@@ -476,6 +476,10 @@ const commands = [
         name: 'streakboard',
         description: 'Shows the current chanting streak leaderboard.',
     },
+    {
+        name: 'sadhanacard',
+        description: 'Shows your personal Sadhana progress card with streaks and badges.',
+    },
 ];
 
 const rest = new REST({ version: '10' }).setToken(token);
@@ -1732,6 +1736,115 @@ client.on('interactionCreate', async interaction => {
                      .setTitle('Streak Leaderboard Failed')
                      .setDescription(`An error occurred while fetching streak data: ${error.message}`);
                  await interaction.editReply({ embeds: [embed] });
+            }
+        }
+        // --- Handle /sadhanacard command ---
+        else if (commandName === 'sadhanacard') {
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /sadhanacard command for user ${interaction.user.tag}`);
+            try {
+                await interaction.deferReply();
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
+            } catch (deferError) {
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                return;
+            }
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
+
+            const userId = interaction.user.id;
+            const username = interaction.user.globalName || interaction.user.username; // Get global name or username
+
+            try {
+                // Fetch user streak data
+                const userStreak = await getUserStreak(userId);
+                const currentStreak = userStreak ? userStreak.streakCount : 0;
+
+                // Fetch all Sadhana logs for the user to calculate totals and all-time score
+                const allSadhanaLogs = await Sadhana.findAll({
+                    where: { userId: userId }
+                });
+
+                let totalJapaRounds = 0;
+                let totalStudyHours = 0;
+                let totalListeningHours = 0;
+                let totalReadingEntries = 0;
+                let allTimeScore = 0;
+                let loggedDaysCount = 0; // Count of days with at least one log
+
+                // Calculate totals and all-time score
+                for (const log of allSadhanaLogs) {
+                    const logData = log.toJSON();
+                    totalJapaRounds += logData.japaRounds || 0;
+                    totalStudyHours += logData.studyHours || 0;
+                    totalListeningHours += logData.listeningHours || 0;
+                    if (logData.readingDetails && logData.readingDetails.trim() !== '') {
+                        totalReadingEntries++;
+                    }
+                    allTimeScore += calculateScore(logData);
+                    loggedDaysCount++;
+                }
+
+                // Determine badges
+                const badges = [];
+                if (loggedDaysCount > 0) {
+                    badges.push('🔰 First Step'); // User has logged at least once
+                }
+                if (currentStreak >= 7) {
+                    badges.push('🔥 7-Day Streaker');
+                }
+                if (currentStreak >= 30) {
+                    badges.push('🌟 30-Day Streaker');
+                }
+                if (totalJapaRounds >= 100) { // Example threshold
+                    badges.push('📿 Japa Seeker (100+ Rounds)');
+                }
+                if (totalStudyHours >= 10) { // Example threshold
+                    badges.push('📚 Study Enthusiast (10+ Hrs)');
+                }
+                if (totalListeningHours >= 5) { // Example threshold
+                    badges.push('🎧 Listening Disciple (5+ Hrs)');
+                }
+                if (totalReadingEntries >= 10) { // Example threshold
+                    badges.push('📖 Diligent Reader (10+ Days)');
+                }
+
+                const embed = new EmbedBuilder()
+                    .setColor('#FFC0CB') // Pink color for the card
+                    .setTitle(`Sadhana Card: ${username}`)
+                    .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true })) // User's avatar
+                    .setDescription(`Your spiritual journey at a glance!`)
+                    .addFields(
+                        { name: 'Current Streak 🔥', value: `${currentStreak} day(s)`, inline: true },
+                        { name: 'Longest Streak 🏆', value: `${userStreak ? userStreak.longestStreak : 0} day(s)`, inline: true }, // Assuming longestStreak is tracked in UserStreak
+                        { name: 'All-Time Score ✨', value: `${allTimeScore.toFixed(2)} points`, inline: true },
+                        { name: 'Total Japa Rounds 📿', value: `${totalJapaRounds}`, inline: true },
+                        { name: 'Total Study Hours 📚', value: `${totalStudyHours.toFixed(2)}`, inline: true },
+                        { name: 'Total Listening Hours 🎧', value: `${totalListeningHours.toFixed(2)}`, inline: true },
+                        { name: 'Badges Earned 🎗️', value: badges.length > 0 ? badges.join('\n') : 'None yet! Keep practicing!' },
+                    )
+                    .setFooter({ text: 'Keep going on your spiritual journey!' })
+                    .setTimestamp();
+
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /sadhanacard command for user ${userId}`);
+                try {
+                    await interaction.editReply({ embeds: [embed] });
+                    console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for /sadhanacard command for user ${userId}`);
+                } catch (editError) {
+                    console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply with embed for /sadhanacard command for user ${userId}:`, editError);
+                    try {
+                        console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
+                        await interaction.followUp({ content: 'There was an error generating your Sadhana Card, but I\'m still working on it!', ephemeral: true });
+                    } catch (followUpError) {
+                        console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
+                    }
+                }
+
+            } catch (error) {
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error during /sadhanacard command for user ${userId}:`, error);
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('Sadhana Card Failed')
+                    .setDescription(`An error occurred while generating your Sadhana Card: ${error.message}`);
+                await interaction.editReply({ embeds: [embed] });
             }
         }
     }
