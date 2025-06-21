@@ -27,7 +27,7 @@ const sequelize = new Sequelize(postgresUri, {
     }
 });
 
-// Define the Sadhana Model
+// Define the Sadhana Model - UPDATED FIELDS
 const Sadhana = sequelize.define('Sadhana', {
     userId: {
         type: DataTypes.STRING, // Use STRING for Discord IDs (they are large numbers)
@@ -38,66 +38,37 @@ const Sadhana = sequelize.define('Sadhana', {
         allowNull: true, // Can be null if the command is used in a DM
     },
     date: {
-        type: DataTypes.DATE, // Use DATE for date/time
+        type: DataTypes.DATEONLY, // Store date only (YYYY-MM-DD) for daily logs
         allowNull: false,
     },
     japaRounds: {
-        type: DataTypes.INTEGER, // Use INTEGER for numbers
+        type: DataTypes.INTEGER, // Use INTEGER for number of japa rounds chanted
         defaultValue: 0,
     },
-    studyHours: {
-        type: DataTypes.FLOAT, // Use FLOAT or DECIMAL for numbers with decimal places
+    // New fields for tracking point components
+    readingPoints: {
+        type: DataTypes.INTEGER, // 0 or 1 point for reading
         defaultValue: 0,
     },
-    listeningHours: {
-        type: DataTypes.FLOAT,
+    hearingPoints: {
+        type: DataTypes.INTEGER, // 0 or 1 point for hearing/sravanam
         defaultValue: 0,
     },
-    readingDetails: {
-        type: DataTypes.TEXT, // Use TEXT for potentially longer strings
-        defaultValue: '',
+    chantingTimeBonus: {
+        type: DataTypes.INTEGER, // 1 or 2 points based on chanting time
+        defaultValue: 0,
     },
-    sleepingTime: {
-        type: DataTypes.DATE, // Store as DATE if possible, or STRING if 'Not Slept' is needed
-        allowNull: true, // Allow null
-    },
-    wakingTime: {
-         type: DataTypes.DATE, // Store as DATE if possible, or STRING
-         allowNull: true, // Allow null
-    },
-    wokeUpEarlyStatus: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    sleptEarlyStatus: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    noMeatEating: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    noGambling: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    noIllicitSex: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    noIntoxication: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    additionalService: {
-        type: DataTypes.TEXT,
-        defaultValue: '',
-    },
+    // Combined score for the day
     score: {
-        type: DataTypes.FLOAT, // Use FLOAT or DECIMAL for the score
+        type: DataTypes.FLOAT, // Total score for the day
         defaultValue: 0,
     },
-    timestamp: {
+    // State for managing reading reminder DMs
+    readingReminderStatus: { // 'none', 'pending_dm_9pm', 'pending_dm_final', 'completed'
+        type: DataTypes.STRING,
+        defaultValue: 'none',
+    },
+    timestamp: { // Original timestamp of log creation/update
         type: DataTypes.DATE,
         defaultValue: DataTypes.NOW, // Use DataTypes.NOW for current timestamp
     },
@@ -105,19 +76,29 @@ const Sadhana = sequelize.define('Sadhana', {
     // Model options
     tableName: 'sadhanas', // Specify table name
     timestamps: false, // Sequelize adds createdAt and updatedAt by default, set to false if not needed
+    indexes: [ // Add a unique index to prevent duplicate entries for same user and date
+        {
+            unique: true,
+            fields: ['userId', 'date']
+        }
+    ]
 });
 
-
-// Define the UserStreak Model
+// Define the UserStreak Model - UPDATED WITH longestStreak and renamed streakCount
 const UserStreak = sequelize.define('UserStreak', {
     userId: {
         type: DataTypes.STRING, // Discord user IDs are large numbers, store as string
         unique: true, // Each user should have only one streak entry
         allowNull: false,
     },
-    streakCount: {
+    currentStreak: { // Renamed from streakCount for clarity
         type: DataTypes.INTEGER,
         defaultValue: 0, // Default streak count is 0
+        allowNull: false,
+    },
+    longestStreak: { // New field to track the longest streak achieved
+        type: DataTypes.INTEGER,
+        defaultValue: 0,
         allowNull: false,
     },
     lastLoggedDateKey: {
@@ -137,9 +118,11 @@ async function connectDB() {
         console.log('Database connection has been established successfully.');
 
         // Sync models - This will create tables if they don't exist or update them
-        // Use { alter: true } to make incremental changes to the schema based on model definitions
-        // Be cautious with { force: true } in production as it drops existing tables!
-        await sequelize.sync({ alter: true });
+        // IMPORTANT: For production, use a proper migration tool or alter tables manually.
+        // { alter: true } attempts to make incremental changes but can sometimes be problematic.
+        // For fresh dev environment, { force: true } can be used to drop and recreate tables.
+        // await sequelize.sync({ force: true }); // Use this for development if you want to wipe data
+        await sequelize.sync({ alter: true }); // Safer for existing data, tries to apply changes
         console.log('Database models synced successfully.');
 
         // Now that the database is ready, log in the Discord client
@@ -156,8 +139,7 @@ async function connectDB() {
 // --- End Database Setup ---
 
 
-// --- Database Data Interaction Functions (Streaks Only) ---
-// These functions use Sequelize to interact with the PostgreSQL database
+// --- Database Data Interaction Functions ---
 
 // Helper function to get a user's streak data
 async function getUserStreak(userId) {
@@ -173,36 +155,31 @@ async function getUserStreak(userId) {
 }
 
 // Helper function to find or create and update a user's streak
-// updateLogicFn is a function that takes the current streak data (as a plain object or null)
-// and returns { newStreakCount, newLastLoggedDateKey }.
 async function findOrCreateAndUpdateUserStreak(userId, updateLogicFn) {
      try {
-         // Find or create the user streak entry
          const [userStreakInstance, created] = await UserStreak.findOrCreate({
              where: { userId: userId },
              defaults: {
-                 streakCount: 0,
+                 currentStreak: 0,
+                 longestStreak: 0,
                  lastLoggedDateKey: null,
              },
          });
 
-        // Get the current data as a plain object to pass to the update logic
         const currentUserStreakData = created ? null : userStreakInstance.toJSON();
-
-        // Calculate the new streak details using the provided logic function
         const { newStreakCount, newLastLoggedDateKey } = updateLogicFn(currentUserStreakData);
 
-        // Update the instance properties
-        userStreakInstance.streakCount = newStreakCount;
+        userStreakInstance.currentStreak = newStreakCount;
         userStreakInstance.lastLoggedDateKey = newLastLoggedDateKey;
 
-        // Save the changes to the database
+        // Update longest streak if current streak is higher
+        if (userStreakInstance.currentStreak > userStreakInstance.longestStreak) {
+             userStreakInstance.longestStreak = userStreakInstance.currentStreak;
+        }
+
         await userStreakInstance.save();
-
-         console.log(`User streak ${created ? 'created' : 'updated'} for user ${userId}.`);
-
-         // Return the updated data as a plain object
-         return userStreakInstance.toJSON();
+        console.log(`User streak ${created ? 'created' : 'updated'} for user ${userId}.`);
+        return userStreakInstance.toJSON();
 
      } catch (err) {
          console.error(`Error finding/creating/updating user streak for ${userId}:`, err);
@@ -210,28 +187,21 @@ async function findOrCreateAndUpdateUserStreak(userId, updateLogicFn) {
      }
 }
 
-
-// Function to get all user streaks for the streakboard (no caching)
+// Function to get all user streaks for the streakboard
 async function getAllUserStreaks() {
     console.log(`[${new Date().toISOString()}] Fetching fresh streak data from database for getAllUserStreaks.`);
     try {
-        // Fetch all user streaks, ordered by streakCount descending
         const streaks = await UserStreak.findAll({
-            order: [['streakCount', 'DESC']],
+            order: [['currentStreak', 'DESC']],
         });
-
-        // Convert Sequelize instances to plain objects
-        const plainStreaks = streaks.map(streak => streak.toJSON());
-
-        return plainStreaks;
-
+        return streaks.map(streak => streak.toJSON());
     } catch (err) {
         console.error('Error fetching all user streaks:', err);
         throw new Error('Failed to fetch all user streak data from database.');
     }
 }
 
-// Function to get the total count of user streak entries (no caching)
+// Function to get the total count of user streak entries
 async function getTotalUserStreakCount() {
      console.log(`[${new Date().toISOString()}] Fetching total user streak count directly from database.`);
      try {
@@ -244,39 +214,15 @@ async function getTotalUserStreakCount() {
      }
 }
 
-// Helper function to calculate the score (logic remains the same, operates on log object)
-function calculateScore(log) {
+// Helper function to calculate the score based on new criteria
+function calculateDailyScore(log) {
     let score = 0;
-
-    // Access data using object properties (matching the keys from Sadhana model)
-    if ((log.japaRounds || 0) > 0) {
-        score += 1;
-    }
-
-    score += (log.studyHours || 0) * 0.1;
-    score += (log.listeningHours || 0) * 0.1;
-
-    if (log.readingDetails && log.readingDetails.trim() !== '') {
-        score += 1;
-    }
-
-    if (log.wokeUpEarlyStatus === true) {
-        score += 1;
-    }
-
-    if (log.sleptEarlyStatus === true) {
-        score += 1;
-    }
-
-    if (log.noMeatEating === true) score += 1;
-    if (log.noGambling === true) score += 1;
-    if (log.noIllicitSex === true) score += 1;
-    if (log.noIntoxication === true) score += 1;
-
+    score += log.readingPoints || 0;
+    score += log.hearingPoints || 0;
+    score += log.chantingTimeBonus || 0;
 
     return parseFloat(score.toFixed(2));
 }
-
 
 // --- End Database Data Interaction Functions ---
 
@@ -285,15 +231,12 @@ function calculateScore(log) {
 const { Client, GatewayIntentBits, REST, Routes, PermissionsBitField, MessageFlags, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 // Using date-fns for robust date/time parsing and comparison
-// Make sure 'date-fns' is installed: npm install date-fns
-const { parse, differenceInCalendarDays, addDays, format, startOfDay, endOfDay, startOfMonth, setHours, setMinutes, setSeconds, isBefore, differenceInMilliseconds, addHours } = require('date-fns'); // Added addHours
+const { parse, differenceInCalendarDays, addDays, format, startOfDay, endOfDay, startOfMonth, setHours, setMinutes, setSeconds, isBefore, differenceInMilliseconds, addHours } = require('date-fns');
 
 // For timezone handling - Needed for accurate IST time comparisons
-// IMPORTANT: Make sure 'date-fns-tz' (v2 or later) is installed: npm install date-fns-tz
 const { toZonedTime, fromZonedTime, formatInTimeZone } = require('date-fns-tz');
 
 // Import node-cron for scheduling tasks
-// Make sure 'node-cron' is installed: npm install node-cron
 const cron = require('node-cron');
 
 
@@ -302,7 +245,7 @@ const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.CLIENT_ID;
 const guildId = process.env.GUILD_ID; // Your server's ID (Guild ID) for faster testing
 const announcementChannelId = process.env.ANNOUNCEMENT_CHANNEL_ID; // Add this to your .env file
-
+const SADHANA_CHANNEL_ID = '1118899025891037265'; // Specific channel for Sadhana commands
 
 // Define the timezone for IST
 const IST_TIMEZONE = 'Asia/Kolkata'; // IANA timezone name for India Standard Time
@@ -315,6 +258,15 @@ const MIN_STREAK_FOR_GRACE_PERIOD = 7; // Minimum streak count for grace period
 
 // Define how many entries per page for the streakboard
 const ENTRIES_PER_PAGE = 10;
+
+// Funny responses for extra rounds button (now for challenges)
+const extraRoundsFunnyResponses = [
+    "A divine challenge awaits! Can you chant these extra rounds for Krishna?",
+    "The spiritual energy is high! Accept this challenge to deepen your connection!",
+    "Ready for a spiritual boost? Here's a special challenge just for you!",
+    "It's a japa mini-quest! Conquer these rounds and feel the bliss!",
+    "Expand your devotion! Take on this extra rounds challenge!",
+];
 
 
 // Create a new Discord client instance.
@@ -333,7 +285,7 @@ const client = new Client({
 const commands = [
      {
         name: 'chant',
-        description: 'Log your japa rounds chanted for today.',
+        description: 'Log your japa rounds chanted for today, and update your daily practice.',
         options: [
             {
                 name: 'rounds',
@@ -342,10 +294,6 @@ const commands = [
                 required: true,
             },
         ],
-    },
-    {
-        name: 'logpractice',
-        description: 'Log your daily spiritual practices using a form.',
     },
     {
         name: 'weeklysummary',
@@ -480,6 +428,11 @@ const commands = [
         name: 'sadhanacard',
         description: 'Shows your personal Sadhana progress card with streaks and badges.',
     },
+    {
+        name: 'resetcard', // New command to reset Sadhana data
+        description: 'Resets all your past Sadhana logs, but keeps your streak (Admin only).', // Clarified admin only
+        default_member_permissions: PermissionsBitField.Flags.Administrator.toString(), // Made admin only
+    },
 ];
 
 const rest = new REST({ version: '10' }).setToken(token);
@@ -496,58 +449,6 @@ const rest = new REST({ version: '10' }).setToken(token);
         console.error('Error registering commands:', error);
     }
 })();
-
-
-// --- Define the Log Practice Modal ---
-const logPracticeModal = new ModalBuilder()
-    .setCustomId('logPracticeModal') // Unique ID for this modal
-    .setTitle('Log Your Daily Practice');
-
-// Create text input components for the modal
-const dateInput = new TextInputBuilder()
-    .setCustomId('dateInput')
-    .setLabel('Date (dd/mm/yyyy)')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true)
-    .setPlaceholder('e.g., 07/05/2025');
-
-const japaRoundsInput = new TextInputBuilder()
-    .setCustomId('japaRoundsInput')
-    .setLabel('Japa Rounds Chanted')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true)
-    .setPlaceholder('e.g., 16');
-
-const studyHoursInput = new TextInputBuilder()
-    .setCustomId('studyHoursInput')
-    .setLabel('Study Hours')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true)
-    .setPlaceholder('e.g., 1.5');
-
-const readingDetailsInput = new TextInputBuilder()
-    .setCustomId('readingDetailsInput')
-    .setLabel('Reading Details (What you read and how much)')
-    .setStyle(TextInputStyle.Paragraph)
-    .setRequired(true)
-    .setPlaceholder('e.g., Bhagavad Gita Ch 2, 10 pages');
-
-const listeningHoursInput = new TextInputBuilder()
-    .setCustomId('listeningHoursInput')
-    .setLabel('Listening Hours')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true)
-    .setPlaceholder('e.g., 0.75');
-
-
-// Add inputs to the modal, grouping them into 5 Action Rows, one input per row for short inputs.
-logPracticeModal.addComponents(
-    { type: 1, components: [dateInput] },
-    { type: 1, components: [japaRoundsInput] },
-    { type: 1, components: [studyHoursInput] },
-    { type: 1, components: [listeningHoursInput] },
-    { type: 1, components: [readingDetailsInput] }
-);
 
 
 // --- Helper function to generate a streakboard page embed and components ---
@@ -582,7 +483,7 @@ async function generateStreakboardPage(streaks, page, totalPages, interaction) {
                  username = `User ID: ${userStreak.userId}`;
              }
 
-            leaderboardDescription += `${globalRank}. **${username}**: ${userStreak.streakCount} day(s) 🙏\n`;
+            leaderboardDescription += `${globalRank}. **${username}**: ${userStreak.currentStreak} day(s) 🙏\n`;
         }
         embed.setDescription(leaderboardDescription);
     }
@@ -616,16 +517,16 @@ client.once('ready', () => {
     // --- Schedule Cron Jobs ---
 
     // Schedule daily streak warning DM (e.g., at 10:00 PM IST)
-    cron.schedule('0 22 * * *', async () => {
+    cron.schedule('0 22 * * *', async () => { // 10:00 PM IST
         console.log(`[${new Date().toISOString()}] Running daily streak warning job.`);
         try {
             const now = new Date();
-            const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE));
+            const todayISTDate = format(toZonedTime(now, IST_TIMEZONE), 'yyyy-MM-dd'); // Get today's IST date string
 
             // Fetch all users with a streak > 0
             const usersWithStreaks = await UserStreak.findAll({
                 where: {
-                    streakCount: { [Op.gt]: 0 }
+                    currentStreak: { [Op.gt]: 0 }
                 }
             });
 
@@ -635,29 +536,25 @@ client.once('ready', () => {
                 const userId = userStreak.userId;
 
                 // Determine cutoff time, applying grace period if streak is long enough
-                let cutoffTimeTodayIST = setHours(setMinutes(setSeconds(todayIST, 0), DAILY_CUTOFF_MINUTE_IST), DAILY_CUTOFF_HOUR_IST);
+                let cutoffTimeTodayIST = setHours(setMinutes(setSeconds(toZonedTime(now, IST_TIMEZONE), 0), DAILY_CUTOFF_MINUTE_IST), DAILY_CUTOFF_HOUR_IST);
                 let isGracePeriodUser = false;
 
-                if (userStreak.streakCount >= MIN_STREAK_FOR_GRACE_PERIOD) {
+                if (userStreak.currentStreak >= MIN_STREAK_FOR_GRACE_PERIOD) {
                     cutoffTimeTodayIST = addHours(cutoffTimeTodayIST, GRACE_PERIOD_HOURS);
                     isGracePeriodUser = true;
-                    console.log(`[${new Date().toISOString()}] User ${userId} has streak ${userStreak.streakCount}, applying ${GRACE_PERIOD_HOURS} hour grace period. New cutoff: ${formatInTimeZone(cutoffTimeTodayIST, IST_TIMEZONE, 'hh:mm a zzz')}`);
+                    console.log(`[${new Date().toISOString()}] User ${userId} has streak ${userStreak.currentStreak}, applying ${GRACE_PERIOD_HOURS} hour grace period. New cutoff: ${formatInTimeZone(cutoffTimeTodayIST, IST_TIMEZONE, 'hh:mm a zzz')}`);
                 }
 
-
-                // Check if the user has logged practice for today by looking for a Sadhana entry
-                const todayLog = await Sadhana.findOne({
+                // Check if the user has logged practice for today (any Sadhana entry)
+                const todaySadhanaLog = await Sadhana.findOne({
                     where: {
                         userId: userId,
-                        date: {
-                            [Op.gte]: startOfDay(toZonedTime(now, IST_TIMEZONE)),
-                            [Op.lte]: endOfDay(toZonedTime(now, IST_TIMEZONE))
-                        }
+                        date: todayISTDate // Check against DATEONLY string
                     }
                 });
 
                 // If no log for today, send a warning DM
-                if (!todayLog) {
+                if (!todaySadhanaLog) {
                     try {
                         const user = await client.users.fetch(userId);
                         if (user) {
@@ -668,14 +565,14 @@ client.once('ready', () => {
                                 const hours = Math.floor(timeRemainingMs / (1000 * 60 * 60));
                                 const minutes = Math.floor((timeRemainingMs % (1000 * 60 * 60)) / (1000 * 60));
 
-                                let warningMessage = `Hare Krishna! 🙏 Your chanting streak of ${userStreak.streakCount} day(s) is about to be lost! You haven't logged your practice for today yet.`;
-                                let timeRemainingMessage = `You have about ${hours} hours and ${minutes} minutes remaining to log your rounds using \`/chant <rounds>\` or log your full practice using \`/logpractice\`. Don't miss your streak!`;
+                                let warningMessage = `Hare Krishna! 🙏 Your chanting streak of ${userStreak.currentStreak} day(s) is about to be lost! You haven't logged your practice for today yet.`;
+                                let timeRemainingMessage = `You have about ${hours} hours and ${minutes} minutes remaining to log your rounds using \`/chant <rounds>\`. Don't miss your streak!`;
 
                                 let embedTitle = 'Streak Warning!';
                                 let embedColor = '#FFCC00'; // Yellow/Orange
 
                                 if (isGracePeriodUser) {
-                                    warningMessage += `\n\n**Special Grace Period!** You have an extra ${GRACE_PERIOD_HOURS} hour grace period because of your ${userStreak.streakCount} day streak!`;
+                                    warningMessage += `\n\n**Special Grace Period!** You have an extra ${GRACE_PERIOD_HOURS} hour grace period because of your ${userStreak.currentStreak} day streak!`;
                                     embedTitle = 'Streak Grace Period Active!';
                                     embedColor = '#ADD8E6'; // Light Blue
                                 }
@@ -710,7 +607,7 @@ client.once('ready', () => {
     });
 
     // Schedule daily announcement message (e.g., at 8:00 AM IST)
-    cron.schedule('0 8 * * *', async () => {
+    cron.schedule('0 8 * * *', async () => { // 8:00 AM IST
         console.log(`[${new Date().toISOString()}] Running daily announcement job.`);
         if (!announcementChannelId) {
             console.warn(`[${new Date().toISOString()}] ANNOUNCEMENT_CHANNEL_ID is not set in .env. Skipping daily announcement.`);
@@ -724,8 +621,7 @@ client.once('ready', () => {
                     .setColor('#0099FF')
                     .setTitle('Daily Practice Reminder!')
                     .setDescription(`Hare Krishna! 🙏 Remember to log your spiritual practices for today.\n\n`
-                                  + `Quickly log your japa rounds using \`/chant <rounds>\`.\n`
-                                  + `Log your full practice details using \`/logpractice\`.`);
+                                  + `Quickly log your japa rounds using \`/chant <rounds>\`.`);
 
                 await channel.send({
                     embeds: [embed],
@@ -743,6 +639,95 @@ client.once('ready', () => {
         timezone: IST_TIMEZONE
     });
 
+    // New Cron Job: 9 PM IST for Hearing/Sravanam and "Will Read Later" Reminders
+    cron.schedule('0 21 * * *', async () => { // 9:00 PM IST
+        console.log(`[${new Date().toISOString()}] Running 9 PM IST daily reminders job (Hearing/Reading).`);
+        const now = new Date();
+        const todayISTDate = format(toZonedTime(now, IST_TIMEZONE), 'yyyy-MM-dd');
+
+        // Fetch all users who have logged Sadhana today or have a pending reminder
+        const usersToRemind = await Sadhana.findAll({
+            where: {
+                date: todayISTDate,
+                [Op.or]: [
+                    { hearingPoints: 0 }, // Haven't logged hearing points yet
+                    { readingReminderStatus: { [Op.in]: ['pending_dm_9pm', 'pending_dm_final'] } } // Have a pending reading reminder
+                ]
+            }
+        });
+
+        for (const sadhanaLog of usersToRemind) {
+            const userId = sadhanaLog.userId;
+            const user = await client.users.fetch(userId).catch(e => console.warn(`Could not fetch user ${userId} for 9 PM reminder: ${e.message}`));
+            if (!user) continue;
+
+            // --- Hearing/Sravanam Reminder ---
+            if (sadhanaLog.hearingPoints === 0) {
+                try {
+                    const embed = new EmbedBuilder()
+                        .setColor('#FFD700')
+                        .setTitle('Daily Sravanam Reminder 👂')
+                        .setDescription('Hare Krishna! Have you done your hearing/Sravanam today?')
+                        .setFooter({ text: 'Log your progress!' });
+
+                    const row = new ActionRowBuilder()
+                        .addComponents(
+                            new ButtonBuilder()
+                                .setCustomId(`sravanam_yes_${todayISTDate}_${userId}`) // Add commanderId
+                                .setLabel('Yes, I have!')
+                                .setStyle(ButtonStyle.Success),
+                            new ButtonBuilder()
+                                .setCustomId(`sravanam_no_${todayISTDate}_${userId}`) // Add commanderId
+                                .setLabel('No, I haven\'t.')
+                                .setStyle(ButtonStyle.Danger),
+                        );
+
+                    await user.send({ embeds: [embed], components: [row] });
+                    console.log(`[${new Date().toISOString()}] Sent Sravanam reminder to ${userId}`);
+                } catch (dmError) {
+                    console.error(`[${new Date().toISOString()}] Failed to send Sravanam reminder to ${userId}:`, dmError);
+                }
+            }
+
+            // --- "Will Read Later" Reminder ---
+            if (sadhanaLog.readingReminderStatus === 'pending_dm_9pm') {
+                try {
+                    const embed = new EmbedBuilder()
+                        .setColor('#FFB6C1')
+                        .setTitle('Reading Reminder 📖')
+                        .setDescription('You marked "Will Read Later" earlier. Have you had a chance to read today?')
+                        .setFooter({ text: 'Time to log that reading!' });
+
+                    const row = new ActionRowBuilder()
+                        .addComponents(
+                            new ButtonBuilder()
+                                .setCustomId(`reading_9pm_yes_${todayISTDate}_${userId}`) // Add commanderId
+                                .setLabel('Yes, I read it!')
+                                .setStyle(ButtonStyle.Success),
+                            new ButtonBuilder()
+                                .setCustomId(`reading_9pm_no_${todayISTDate}_${userId}`) // Add commanderId
+                                .setLabel('No, I didn\'t read.')
+                                .setStyle(ButtonStyle.Danger),
+                            new ButtonBuilder()
+                                .setCustomId(`reading_9pm_now_${todayISTDate}_${userId}`) // Add commanderId
+                                .setLabel('I will read now!')
+                                .setStyle(ButtonStyle.Primary),
+                        );
+
+                    await user.send({ embeds: [embed], components: [row] });
+                    sadhanaLog.readingReminderStatus = 'pending_dm_final'; // Move to next state
+                    await sadhanaLog.save();
+                    console.log(`[${new Date().toISOString()}] Sent 9 PM reading reminder to ${userId}`);
+                } catch (dmError) {
+                    console.error(`[${new Date().toISOString()}] Failed to send 9 PM reading reminder to ${userId}:`, dmError);
+                }
+            }
+        }
+    }, {
+        scheduled: true,
+        timezone: IST_TIMEZONE
+    });
+
 
 });
 
@@ -750,13 +735,31 @@ client.on('interactionCreate', async interaction => {
     // Added process.pid for better debugging in multi-instance environments
     console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Interaction received: ${interaction.id}, Type: ${interaction.type}, Command: ${interaction.isCommand() ? interaction.commandName : 'N/A'}, Modal: ${interaction.isModalSubmit() ? interaction.customId : 'N/A'}, Button: ${interaction.isButton() ? interaction.customId : 'N/A'}`);
 
+    const userId = interaction.user.id;
+    const username = interaction.user.tag;
+    const now = new Date();
+    const todayIST = toZonedTime(now, IST_TIMEZONE);
+    const todayISTDateString = format(todayIST, 'yyyy-MM-dd'); // Use DATEONLY format for consistency with DB
+
+    // --- Command Channel Restriction ---
+    if (interaction.isCommand() && interaction.commandName !== 'sadhanacard' && interaction.commandName !== 'resetcard') { // Allow sadhanacard and resetcard outside specific channel
+        if (interaction.channelId !== SADHANA_CHANNEL_ID) {
+            await interaction.reply({
+                content: `Please use this command only in the <#${SADHANA_CHANNEL_ID}> channel.`,
+                ephemeral: true
+            });
+            return;
+        }
+    }
+
+
     // --- Handle Slash Command Interactions ---
     if (interaction.isCommand()) {
         const { commandName } = interaction;
 
         // --- Handle /chant command ---
         if (commandName === 'chant') {
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /chant command for user ${interaction.user.tag}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /chant command for user ${username}`);
             // Defer the reply immediately
             try {
                 await interaction.deferReply();
@@ -768,10 +771,8 @@ client.on('interactionCreate', async interaction => {
             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
             const rounds = interaction.options.getInteger('rounds');
-            const userId = interaction.user.id;
             const guildId = interaction.guild?.id;
-            const now = new Date();
-            const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE));
+
 
             if (rounds < 0) {
                  const embed = new EmbedBuilder()
@@ -782,37 +783,36 @@ client.on('interactionCreate', async interaction => {
                  return;
             }
 
+            // Calculate chanting time bonus based on current IST time
+            let chantingTimeBonus = 0;
+            const currentHourIST = todayIST.getHours();
+            if (currentHourIST >= 3 && currentHourIST < 9) { // 3 AM to 8:59 AM IST
+                chantingTimeBonus = 2;
+            } else if (currentHourIST >= 9 && currentHourIST <= 23) { // 9 AM to 11:59 PM IST
+                chantingTimeBonus = 1;
+            }
+            // If it's after midnight (00:00 to 02:59), the bonus is 0, which is the default.
+
             // --- Database Interaction for /chant (Sadhana Log part) ---
             let sadhanaEntry;
             let created;
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database findOrCreate for Sadhana log (/chant) for user ${userId} on ${format(todayIST, 'yyyy-MM-dd')}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database findOrCreate for Sadhana log (/chant) for user ${userId} on ${todayISTDateString}`);
             try {
                  [sadhanaEntry, created] = await Sadhana.findOrCreate({
                     where: {
                         userId: userId,
-                        date: {
-                             [Op.gte]: startOfDay(toZonedTime(now, IST_TIMEZONE)),
-                             [Op.lte]: endOfDay(toZonedTime(now, IST_TIMEZONE))
-                        }
+                        date: todayISTDateString // Use DATEONLY string
                     },
                     defaults: {
                         userId: userId,
                         guildId: guildId,
-                        date: todayIST,
+                        date: todayISTDateString,
                         japaRounds: rounds,
-                        studyHours: 0,
-                        listeningHours: 0,
-                        readingDetails: '',
-                        wakingTime: null,
-                        wokeUpEarlyStatus: false,
-                        sleepingTime: null,
-                        sleptEarlyStatus: false,
-                        noMeatEating: false,
-                        noGambling: false,
-                        noIllicitSex: false,
-                        noIntoxication: false,
-                        additionalService: '',
-                        score: 0,
+                        readingPoints: 0,
+                        hearingPoints: 0,
+                        chantingTimeBonus: chantingTimeBonus,
+                        readingReminderStatus: 'none',
+                        score: 0, // Will be calculated after all components are updated
                     }
                 });
                  console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database findOrCreate for Sadhana log (/chant). Created: ${created}`);
@@ -829,12 +829,13 @@ client.on('interactionCreate', async interaction => {
             // If updating an existing Sadhana entry, add the new rounds to existing rounds
             if (!created) {
                  sadhanaEntry.japaRounds = (sadhanaEntry.japaRounds || 0) + rounds;
+                 sadhanaEntry.chantingTimeBonus = chantingTimeBonus; // Update bonus in case they log again later in day
             }
+            // Calculate score after updating japa and bonus for current action
+            sadhanaEntry.score = calculateDailyScore(sadhanaEntry.toJSON());
 
-            // Recalculate and save the score for the Sadhana entry
-            sadhanaEntry.score = calculateScore(sadhanaEntry.toJSON());
 
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database save for Sadhana log (/chant) for user ${userId} on ${format(todayIST, 'yyyy-MM-dd')}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database save for Sadhana log (/chant) for user ${userId} on ${todayISTDateString}`);
             try {
                 await sadhanaEntry.save();
                  console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database save for Sadhana log (/chant).`);
@@ -851,119 +852,104 @@ client.on('interactionCreate', async interaction => {
 
             // --- Chanting Streak Logic for /chant ---
             let userStreak;
-            let streakCreated;
             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database findOrCreateAndUpdateUserStreak for streak (/chant) for user ${userId}`);
             try {
-                 [userStreak, streakCreated] = await UserStreak.findOrCreate({
-                    where: { userId: userId },
-                    defaults: {
-                        userId: userId,
-                        streakCount: 0,
-                        lastLoggedDateKey: null,
+                 userStreak = await findOrCreateAndUpdateUserStreak(userId, (currentUserStreak) => {
+                    let currentStreakVal = currentUserStreak ? currentUserStreak.currentStreak : 0;
+                    const lastLoggedDateKey = currentUserStreak ? currentUserStreak.lastLoggedDateKey : null;
+                    let newStreakVal = currentStreakVal;
+
+                    const lastLoggedDate = lastLoggedDateKey ? startOfDay(parse(lastLoggedDateKey, 'yyyy-MM-dd', new Date())) : null;
+                    const todayISTStartOfDay = startOfDay(todayIST); // Ensure we're comparing start of day
+
+                    if (lastLoggedDate && !isNaN(lastLoggedDate.getTime())) {
+                        const dayDifference = differenceInCalendarDays(todayISTStartOfDay, lastLoggedDate);
+
+                        if (dayDifference === 1) { // Logged yesterday, continue streak
+                            newStreakVal = currentStreakVal + 1;
+                        } else if (dayDifference > 1) { // Streak broken
+                            newStreakVal = 1;
+                        } else { // Already logged today, or same day but different time
+                            newStreakVal = currentStreakVal;
+                        }
+                    } else { // First log ever
+                        newStreakVal = 1;
                     }
-                });
-                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database findOrCreate for streak (/chant). Created: ${streakCreated}`);
+                    return { newStreakCount: newStreakVal, newLastLoggedDateKey: todayISTDateString };
+                 });
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database findOrCreateAndUpdateUserStreak for streak (/chant).`);
             } catch (dbError) {
-                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during findOrCreate for streak (/chant):`, dbError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during streak update for /chant:`, dbError);
                   const embed = new EmbedBuilder()
                       .setColor('#FF0000')
                       .setTitle('Chanting Log Failed')
-                      .setDescription('An error occurred while accessing streak data. Please try again later.');
+                      .setDescription('An error occurred while updating streak data. Please try again later.');
                   await interaction.editReply({ embeds: [embed] });
                   return;
             }
 
 
-            let currentStreak = userStreak.streakCount;
-            const lastLoggedDateKey = userStreak.lastLoggedDateKey;
-            let newStreak = currentStreak;
-
-            const lastLoggedDate = lastLoggedDateKey ? startOfDay(parse(lastLoggedDateKey, 'yyyy-MM-dd', new Date())) : null;
-
-            if (todayIST && !isNaN(todayIST.getTime())) {
-                if (lastLoggedDate && !isNaN(lastLoggedDate.getTime())) {
-                    const dayDifference = differenceInCalendarDays(todayIST, lastLoggedDate);
-
-                    if (dayDifference === 1) {
-                        newStreak = currentStreak + 1;
-                    } else if (dayDifference > 1) {
-                        newStreak = 1; // Reset streak
-                    } else if (dayDifference <= 0 && format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
-                        newStreak = currentStreak;
-                    }
-                } else {
-                    newStreak = 1;
-                }
-
-                if (!lastLoggedDateKey || (lastLoggedDate && todayIST >= lastLoggedDate)) {
-                     userStreak.streakCount = newStreak;
-                     userStreak.lastLoggedDateKey = format(todayIST, 'yyyy-MM-dd'); // Corrected format
-                }
-
-
-            } else {
-                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Invalid todayIST date for streak logic (/chant): ${todayIST}`);
-            }
-
-            // Save the updated user streak
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database save for streak (/chant) for user ${userId}`);
-            try {
-                await userStreak.save();
-                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database save for streak (/chant).`);
-            } catch (dbError) {
-                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during save for streak (/chant):`, dbError);
-                 const embed = new EmbedBuilder()
-                     .setColor('#FF0000')
-                     .setTitle('Chanting Log Failed')
-                     .setDescription('An error occurred while saving streak data to the database. Please try again later.');
-                 await interaction.editReply({ embeds: [embed] });
-                 return;
-            }
-
-
-            // --- Create an embed response message for /chant ---
-            const embed = new EmbedBuilder()
+            // --- Build Initial Reply Embed with Extra Rounds Button & Reading Prompt ---
+            const initialEmbed = new EmbedBuilder()
                 .setColor('#00FF00')
-                .setTitle('Japa Rounds Logged!')
-                .setDescription(`You logged **${rounds}** rounds for today (${format(todayIST, 'dd/MM/yyyy')}).`)
-                .addFields(
-                     { name: 'Current Chanting Streak', value: `${userStreak.streakCount} day(s) 🙏`, inline: true }
+                .setTitle('Japa Rounds Logged! 🎶')
+                .setDescription(`You logged **${sadhanaEntry.japaRounds}** rounds for today (${format(todayIST, 'dd/MM/yyyy')}).\n`
+                              + `Today's Practice Score: **${sadhanaEntry.score.toFixed(2)}**\n`
+                              + `Current Chanting Streak: **${userStreak.currentStreak} day(s) 🙏**`);
+
+            // Embed userId into customId for multi-user interaction control
+            const extraRoundsButton = new ButtonBuilder()
+                .setCustomId(`extra_rounds_button_${todayISTDateString}_${userId}`)
+                .setLabel('Feel like chanting few more rounds?')
+                .setStyle(ButtonStyle.Primary)
+                .setEmoji('➕'); // Plus sign emoji
+
+            const readingPromptEmbed = new EmbedBuilder()
+                .setColor('#87CEEB') // Sky Blue
+                .setTitle('Have you read any spiritual book today? 📚')
+                .setFooter({ text: 'This will help track your reading progress.' });
+
+            const readingPromptRow = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`read_yes_${todayISTDateString}_${userId}`) // Add userId
+                        .setLabel('Yes')
+                        .setStyle(ButtonStyle.Success)
+                        .setEmoji('✅'),
+                    new ButtonBuilder()
+                        .setCustomId(`read_no_today_${todayISTDateString}_${userId}`) // Add userId
+                        .setLabel('Will Not Read Today')
+                        .setStyle(ButtonStyle.Danger)
+                        .setEmoji('❌'),
+                    new ButtonBuilder()
+                        .setCustomId(`read_later_${todayISTDateString}_${userId}`) // Add userId
+                        .setLabel('Will Read Later')
+                        .setStyle(ButtonStyle.Secondary)
+                        .setEmoji('⏰'),
                 );
 
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /chant command for user ${userId}`);
+            const initialComponents = [
+                new ActionRowBuilder().addComponents(extraRoundsButton),
+                readingPromptRow
+            ];
+
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /chant command with buttons for user ${userId}`);
             try {
-                 await interaction.editReply({ embeds: [embed] });
+                 await interaction.editReply({ embeds: [initialEmbed, readingPromptEmbed], components: initialComponents });
                  console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for /chant command for user ${userId}`);
             } catch (editError) {
-                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply with embed for /chant command for user ${userId}:`, editError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply for /chant command for user ${userId}:`, editError);
                  try {
-                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError); // Log full error
-                     await interaction.followUp({ content: 'Successfully logged your chanting, but failed to update the original message.', ephemeral: true });
+                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
+                     await interaction.followUp({ content: 'Successfully logged your chanting, but failed to update the original message. Please check DM for reading reminder.', ephemeral: true });
                  } catch (followUpError) {
                      console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
                  }
             }
-
-
         }
-        // --- Handle /logpractice command ---
-        else if (commandName === 'logpractice') {
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /logpractice command for user ${interaction.user.tag}`);
-            try {
-                 await interaction.showModal(logPracticeModal);
-                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully showed logPracticeModal to user ${interaction.user.tag}`);
-            } catch (modalError) {
-                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error showing logPracticeModal to user ${interaction.user.tag}:`, modalError);
-                 const embed = new EmbedBuilder()
-                     .setColor('#FF0000')
-                     .setTitle('Logging Failed')
-                     .setDescription('An error occurred while opening the practice logging form. Please try again later.');
-                 await interaction.reply({ embeds: [embed], ephemeral: true });
-            }
-        }
-        // --- Handle /weeklysummary command ---
+        // ... (other slash commands) ...
         else if (commandName === 'weeklysummary') {
-             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /weeklysummary command for user ${interaction.user.tag}`);
+             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /weeklysummary command for user ${username}`);
              try {
                  await interaction.deferReply();
                  console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
@@ -983,8 +969,8 @@ client.on('interactionCreate', async interaction => {
                      where: {
                          userId: userId,
                          date: {
-                             [Op.gte]: startDateIST,
-                             [Op.lte]: endDateIST
+                             [Op.gte]: format(startDateIST, 'yyyy-MM-dd'),
+                             [Op.lte]: format(endDateIST, 'yyyy-MM-dd')
                          }
                      },
                      order: [['date', 'ASC']]
@@ -992,48 +978,33 @@ client.on('interactionCreate', async interaction => {
 
                  let totalScore = 0;
                  let loggedDays = 0;
-                 let japaRounds = 0;
-                 let studyHours = 0;
-                 let listeningHours = 0;
-                 let readingCount = 0;
-                 let wokeUpEarlyCount = 0;
-                 let sleptEarlyCount = 0;
-                 let regulativePrinciplesCount = 0;
-                 let additionalServiceCount = 0;
+                 let totalJapaRounds = 0;
+                 let totalReadingPoints = 0;
+                 let totalHearingPoints = 0;
+                 let totalChantingBonus = 0;
+
 
                  for (const log of logs) {
                      const logData = log.toJSON();
-                     totalScore += calculateScore(logData);
+                     totalScore += calculateDailyScore(logData);
                      loggedDays++;
-                     japaRounds += logData.japaRounds || 0;
-                     studyHours += logData.studyHours || 0;
-                     listeningHours += logData.listeningHours || 0;
-                     if (logData.readingDetails && logData.readingDetails.trim() !== '') readingCount++;
-                     if (logData.wokeUpEarlyStatus) wokeUpEarlyCount++;
-                     if (logData.sleptEarlyStatus) sleptEarlyCount++;
-
-                     if (logData.noMeatEating && logData.noGambling && logData.noIllicitSex && logData.noIntoxication) {
-                         regulativePrinciplesCount++;
-                     }
-
-                     if (logData.additionalService && logData.additionalService.trim() !== '') additionalServiceCount++;
+                     totalJapaRounds += logData.japaRounds || 0;
+                     totalReadingPoints += logData.readingPoints || 0;
+                     totalHearingPoints += logData.hearingPoints || 0;
+                     totalChantingBonus += logData.chantingTimeBonus || 0;
                  }
 
                  const embed = new EmbedBuilder()
                      .setColor('#3498DB')
-                     .setTitle(`Weekly Practice Summary for ${interaction.user.username}`)
+                     .setTitle(`Weekly Practice Summary for ${username}`)
                      .setDescription(`Summary for the period: ${format(startDateIST, 'dd/MM/yyyy')} - ${format(endDateIST, 'dd/MM/yyyy')}`)
                      .addFields(
                          { name: 'Total Score', value: `${totalScore.toFixed(2)} points`, inline: true },
                          { name: 'Logged Days', value: `${loggedDays} day(s)`, inline: true },
-                         { name: 'Total Japa Rounds', value: `${japaRounds}`, inline: true },
-                         { name: 'Total Study Hours', value: `${studyHours.toFixed(2)}`, inline: true },
-                         { name: 'Total Listening Hours', value: `${listeningHours.toFixed(2)}`, inline: true },
-                         { name: 'Days with Reading', value: `${readingCount}`, inline: true },
-                         { name: 'Days Woke Up Early', value: `${wokeUpEarlyCount}`, inline: true },
-                         { name: 'Days Slept Early', value: `${sleptEarlyCount}`, inline: true },
-                         { name: 'Days Regulative Principles Followed', value: `${regulativePrinciplesCount}`, inline: true },
-                         { name: 'Days with Additional Service', value: `${additionalServiceCount}`, inline: true }
+                         { name: 'Total Japa Rounds', value: `${totalJapaRounds}`, inline: true },
+                         { name: 'Total Reading Points', value: `${totalReadingPoints}`, inline: true },
+                         { name: 'Total Hearing Points', value: `${totalHearingPoints}`, inline: true },
+                         { name: 'Total Chanting Bonus Points', value: `${totalChantingBonus}`, inline: true }
                      )
                      .setFooter({ text: 'Based on your logged practices.' });
 
@@ -1060,9 +1031,8 @@ client.on('interactionCreate', async interaction => {
                   await interaction.editReply({ embeds: [embed] });
              }
         }
-        // --- Handle /monthlysummary command ---
         else if (commandName === 'monthlysummary') {
-             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /monthlysummary command for user ${interaction.user.tag}`);
+             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /monthlysummary command for user ${username}`);
              try {
                  await interaction.deferReply();
                  console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
@@ -1082,8 +1052,8 @@ client.on('interactionCreate', async interaction => {
                      where: {
                          userId: userId,
                          date: {
-                             [Op.gte]: startDateIST,
-                             [Op.lte]: endDateIST
+                             [Op.gte]: format(startDateIST, 'yyyy-MM-dd'),
+                             [Op.lte]: format(endDateIST, 'yyyy-MM-dd')
                          }
                      },
                      order: [['date', 'ASC']]
@@ -1091,48 +1061,33 @@ client.on('interactionCreate', async interaction => {
 
                  let totalScore = 0;
                  let loggedDays = 0;
-                 let japaRounds = 0;
-                 let studyHours = 0;
-                 let listeningHours = 0;
-                 let readingCount = 0;
-                 let wokeUpEarlyCount = 0;
-                 let sleptEarlyCount = 0;
-                 let regulativePrinciplesCount = 0;
-                 let additionalServiceCount = 0;
+                 let totalJapaRounds = 0;
+                 let totalReadingPoints = 0;
+                 let totalHearingPoints = 0;
+                 let totalChantingBonus = 0;
+
 
                  for (const log of logs) {
                      const logData = log.toJSON();
-                     totalScore += calculateScore(logData);
+                     totalScore += calculateDailyScore(logData);
                      loggedDays++;
-                     japaRounds += logData.japaRounds || 0;
-                     studyHours += logData.studyHours || 0;
-                     listeningHours += logData.listeningHours || 0;
-                     if (logData.readingDetails && logData.readingDetails.trim() !== '') readingCount++;
-                     if (logData.wokeUpEarlyStatus) wokeUpEarlyCount++;
-                     if (logData.sleptEarlyStatus) sleptEarlyCount++;
-
-                     if (logData.noMeatEating && logData.noGambling && logData.noIllicitSex && logData.noIntoxication) {
-                         regulativePrinciplesCount++;
-                     }
-
-                     if (logData.additionalService && logData.additionalService.trim() !== '') additionalServiceCount++;
+                     totalJapaRounds += logData.japaRounds || 0;
+                     totalReadingPoints += logData.readingPoints || 0;
+                     totalHearingPoints += logData.hearingPoints || 0;
+                     totalChantingBonus += logData.chantingTimeBonus || 0;
                  }
 
                  const embed = new EmbedBuilder()
                      .setColor('#2ECC71')
-                     .setTitle(`Monthly Practice Summary for ${interaction.user.username}`)
+                     .setTitle(`Monthly Practice Summary for ${username}`)
                      .setDescription(`Summary for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`)
                      .addFields(
                          { name: 'Total Score', value: `${totalScore.toFixed(2)} points`, inline: true },
                          { name: 'Logged Days', value: `${loggedDays} day(s)`, inline: true },
-                         { name: 'Total Japa Rounds', value: `${japaRounds}`, inline: true },
-                         { name: 'Total Study Hours', value: `${studyHours.toFixed(2)}`, inline: true },
-                         { name: 'Total Listening Hours', value: `${listeningHours.toFixed(2)}`, inline: true },
-                         { name: 'Days with Reading', value: `${readingCount}`, inline: true },
-                         { name: 'Days Woke Up Early', value: `${wokeUpEarlyCount}`, inline: true },
-                         { name: 'Days Slept Early', value: `${sleptEarlyCount}`, inline: true },
-                         { name: 'Days Regulative Principles Followed', value: `${regulativePrinciplesCount}`, inline: true },
-                         { name: 'Days with Additional Service', value: `${additionalServiceCount}`, inline: true }
+                         { name: 'Total Japa Rounds', value: `${totalJapaRounds}`, inline: true },
+                         { name: 'Total Reading Points', value: `${totalReadingPoints}`, inline: true },
+                         { name: 'Total Hearing Points', value: `${totalHearingPoints}`, inline: true },
+                         { name: 'Total Chanting Bonus Points', value: `${totalChantingBonus}`, inline: true }
                      )
                      .setFooter({ text: 'Based on your logged practices.' });
 
@@ -1159,9 +1114,8 @@ client.on('interactionCreate', async interaction => {
                   await interaction.editReply({ embeds: [embed] });
              }
         }
-        // --- Handle /leaderboard command ---
         else if (commandName === 'leaderboard') {
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /leaderboard command for user ${interaction.user.tag}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /leaderboard command for user ${username}`);
             try {
                 await interaction.deferReply();
                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
@@ -1173,17 +1127,17 @@ client.on('interactionCreate', async interaction => {
 
             const period = interaction.options.getString('period');
             const now = new Date();
-            let startDateIST;
-            let endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE));
+            let startDateISTDateString;
+            let endDateISTDateString = format(toZonedTime(now, IST_TIMEZONE), 'yyyy-MM-dd');
             let leaderboardTitle;
             let leaderboardDescription;
 
             if (period === 'weekly') {
-                startDateIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE));
+                startDateISTDateString = format(startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE)), 'yyyy-MM-dd');
                 leaderboardTitle = 'Weekly Practice Leaderboard 🏆';
-                leaderboardDescription = `Top devotees based on scores from ${format(startDateIST, 'dd/MM/yyyy')} to ${format(endDateIST, 'dd/MM/yyyy')}`;
+                leaderboardDescription = `Top devotees based on scores from ${format(parse(startDateISTDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')} to ${format(parse(endDateISTDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}`;
             } else if (period === 'monthly') {
-                startDateIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE));
+                startDateISTDateString = format(startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE)), 'yyyy-MM-dd');
                 leaderboardTitle = 'Monthly Practice Leaderboard 🏆';
                 leaderboardDescription = `Top devotees based on scores for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`;
             } else {
@@ -1199,18 +1153,19 @@ client.on('interactionCreate', async interaction => {
                 const logs = await Sadhana.findAll({
                     where: {
                         date: {
-                            [Op.gte]: startDateIST,
-                            [Op.lte]: endDateIST
+                            [Op.gte]: startDateISTDateString,
+                            [Op.lte]: endDateISTDateString
                         }
                     },
-                    attributes: ['userId', 'japaRounds', 'studyHours', 'listeningHours', 'readingDetails', 'wokeUpEarlyStatus', 'sleptEarlyStatus', 'noMeatEating', 'noGambling', 'noIllicitSex', 'noIntoxication', 'additionalService'],
+                    // Select all relevant attributes for score calculation
+                    attributes: ['userId', 'readingPoints', 'hearingPoints', 'chantingTimeBonus'],
                 });
 
                 const userScores = {};
                 for (const log of logs) {
                     const logData = log.toJSON();
                     const userId = logData.userId;
-                    const score = calculateScore(logData);
+                    const score = calculateDailyScore(logData);
 
                     if (!userScores[userId]) {
                         userScores[userId] = { totalScore: 0, loggedDays: 0 };
@@ -1235,20 +1190,20 @@ client.on('interactionCreate', async interaction => {
                     let leaderboardText = '';
                     for (let i = 0; i < topEntries.length; i++) {
                         const entry = topEntries[i];
-                        let username = 'Unknown User';
+                        let fetchedUsername = 'Unknown User';
                          try {
                               if (interaction.guild) {
                                  const member = await interaction.guild.members.fetch(entry.userId);
-                                  username = member.user.globalName || member.user.username;
+                                  fetchedUsername = member.user.globalName || member.user.username;
                               } else {
                                   const user = await client.users.fetch(entry.userId);
-                                  username = user.globalName || user.username;
+                                  fetchedUsername = user.globalName || user.username;
                               }
                          } catch (err) {
                              console.warn(`Could not fetch user/member ${entry.userId} for leaderboard:`, err.message);
-                             username = `User ID: ${entry.userId}`;
+                             fetchedUsername = `User ID: ${entry.userId}`;
                          }
-                        leaderboardText += `${i + 1}. **${username}**: ${entry.totalScore.toFixed(2)} points (${entry.loggedDays} logged day(s))\n`;
+                        leaderboardText += `${i + 1}. **${fetchedUsername}**: ${entry.totalScore.toFixed(2)} points (${entry.loggedDays} logged day(s))\n`;
                     }
                     embed.addFields({ name: 'Rankings', value: leaderboardText });
                 }
@@ -1276,9 +1231,8 @@ client.on('interactionCreate', async interaction => {
                  await interaction.editReply({ embeds: [embed] });
             }
         }
-        // --- Handle /myscore command ---
         else if (commandName === 'myscore') {
-             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /myscore command for user ${interaction.user.tag}`);
+             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /myscore command for user ${username}`);
              try {
                  await interaction.deferReply();
                  console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
@@ -1291,17 +1245,17 @@ client.on('interactionCreate', async interaction => {
              const period = interaction.options.getString('period');
              const userId = interaction.user.id;
              const now = new Date();
-             let startDateIST;
-             let endDateIST = endOfDay(toZonedTime(now, IST_TIMEZONE));
+             let startDateISTDateString;
+             let endDateISTDateString = format(toZonedTime(now, IST_TIMEZONE), 'yyyy-MM-dd');
              let scoreTitle;
              let scoreDescription;
 
              if (period === 'weekly') {
-                 startDateIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE));
+                 startDateISTDateString = format(startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE)), 'yyyy-MM-dd');
                  scoreTitle = 'Your Weekly Practice Score';
-                 scoreDescription = `Score for the period: ${format(startDateIST, 'dd/MM/yyyy')} - ${format(endDateIST, 'dd/MM/yyyy')}`;
+                 scoreDescription = `Score for the period: ${format(parse(startDateISTDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')} - ${format(parse(endDateISTDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}`;
              } else if (period === 'monthly') {
-                 startDateIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE));
+                 startDateISTDateString = format(startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE)), 'yyyy-MM-dd');
                  scoreTitle = 'Your Monthly Practice Score';
                  scoreDescription = `Score for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`;
              } else {
@@ -1318,17 +1272,17 @@ client.on('interactionCreate', async interaction => {
                      where: {
                          userId: userId,
                          date: {
-                             [Op.gte]: startDateIST,
-                             [Op.lte]: endDateIST
+                             [Op.gte]: startDateISTDateString,
+                             [Op.lte]: endDateISTDateString
                          }
                      },
-                     attributes: ['japaRounds', 'studyHours', 'listeningHours', 'readingDetails', 'wokeUpEarlyStatus', 'sleptEarlyStatus', 'noMeatEating', 'noGambling', 'noIllicitSex', 'noIntoxication', 'additionalService'],
+                     attributes: ['readingPoints', 'hearingPoints', 'chantingTimeBonus'],
                  });
 
                  let totalScore = 0;
                  let loggedDays = 0;
                  for (const log of logs) {
-                     totalScore += calculateScore(log.toJSON());
+                     totalScore += calculateDailyScore(log.toJSON());
                      loggedDays++;
                  }
 
@@ -1365,9 +1319,8 @@ client.on('interactionCreate', async interaction => {
                   await interaction.editReply({ embeds: [embed] });
              }
         }
-        // --- Handle /showscore command ---
         else if (commandName === 'showscore') {
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /showscore command for user ${interaction.user.tag}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /showscore command for user ${username}`);
             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to defer reply for interaction ${interaction.id}`);
             try {
                 await interaction.deferReply();
@@ -1381,17 +1334,15 @@ client.on('interactionCreate', async interaction => {
 
             const targetUser = interaction.options.getUser('user');
             const userId = targetUser.id;
-            const username = targetUser.globalName || targetUser.username;
+            const targetUsername = targetUser.globalName || targetUser.username;
 
             try {
                 const userStreak = await getUserStreak(userId);
-                const currentStreak = userStreak ? userStreak.streakCount : 0;
+                const currentStreak = userStreak ? userStreak.currentStreak : 0; // Use currentStreak
 
-                const now = new Date();
-                const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE));
-
-                const startOfLast7DaysIST = startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE));
-                const startOfMonthIST = startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE));
+                const startOfLast7DaysDateString = format(startOfDay(toZonedTime(addDays(now, -6), IST_TIMEZONE)), 'yyyy-MM-dd');
+                const startOfMonthDateString = format(startOfDay(toZonedTime(startOfMonth(now), IST_TIMEZONE)), 'yyyy-MM-dd');
+                const todayISTDate = format(todayIST, 'yyyy-MM-dd'); // Corrected to DATEONLY
 
                  console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Fetching Sadhana logs for user ${userId} for score calculation.`);
                 const allTimeLogs = await Sadhana.findAll({
@@ -1409,19 +1360,19 @@ client.on('interactionCreate', async interaction => {
                 let allTimeLoggedDays = 0;
 
                 for (const log of allTimeLogs) {
-                    const logDate = log.date instanceof Date ? log.date : new Date(log.date);
-                    const logDateIST = startOfDay(toZonedTime(logDate, IST_TIMEZONE));
+                    const logDate = log.date; // already DATEONLY string
+                    const logData = log.toJSON();
 
-                    allTimeScore += calculateScore(log.toJSON());
+                    allTimeScore += calculateDailyScore(logData);
                     allTimeLoggedDays++;
 
-                    if (!isBefore(logDateIST, startOfLast7DaysIST)) {
-                        weeklyScore += calculateScore(log.toJSON());
+                    if (logDate >= startOfLast7DaysDateString) { // Compare DATEONLY strings
+                        weeklyScore += calculateDailyScore(logData);
                         weeklyLoggedDays++;
                     }
 
-                    if (!isBefore(logDateIST, startOfMonthIST)) {
-                         monthlyScore += calculateScore(log.toJSON());
+                    if (logDate >= startOfMonthDateString) { // Compare DATEONLY strings
+                         monthlyScore += calculateDailyScore(logData);
                          monthlyLoggedDays++;
                     }
                 }
@@ -1429,7 +1380,7 @@ client.on('interactionCreate', async interaction => {
 
                 const embed = new EmbedBuilder()
                     .setColor('#00CED1')
-                    .setTitle(`Practice Summary for ${username}`)
+                    .setTitle(`Practice Summary for ${targetUsername}`)
                     .addFields(
                         { name: 'Current Chanting Streak', value: `${currentStreak} day(s) 🙏}` },
                         { name: 'Weekly (Last 7 Days)', value: `${weeklyScore.toFixed(2)} points (${weeklyLoggedDays} logged)`, inline: true },
@@ -1470,7 +1421,7 @@ client.on('interactionCreate', async interaction => {
                  await interaction.reply({ embeds: [embed] });
                 return;
             }
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /streakset command for user ${interaction.user.tag}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /streakset command for user ${username}`);
 
 
             const targetUser = interaction.options.getUser('user');
@@ -1489,9 +1440,8 @@ client.on('interactionCreate', async interaction => {
 
             try {
                  const userStreak = await findOrCreateAndUpdateUserStreak(targetUserId, (currentUserStreak) => {
-                     const now = new Date();
                      const yesterday = addDays(now, -1);
-                     const yesterdayKey = format(yesterday, 'yyyy-MM-dd');
+                     const yesterdayKey = format(yesterday, 'yyyy-MM-dd'); // For last logged date to enable streak progression
 
                      return {
                          newStreakCount: newStreakValue,
@@ -1502,7 +1452,7 @@ client.on('interactionCreate', async interaction => {
                 const embed = new EmbedBuilder()
                     .setColor('#32CD32')
                     .setTitle('Streak Set Successfully')
-                    .setDescription(`Successfully set ${targetUser.username}'s chanting streak to ${userStreak.streakCount}. Their last logged date is set for streak calculation.`);
+                    .setDescription(`Successfully set ${targetUser.username}'s chanting streak to ${userStreak.currentStreak}. Their last logged date is set for streak calculation.`);
 
                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to reply for streakset for user ${targetUserId}`);
                 try {
@@ -1523,29 +1473,29 @@ client.on('interactionCreate', async interaction => {
         }
         // Handle the /help command
         else if (commandName === 'help') {
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /help command for user ${interaction.user.tag}`);
-            const youtubeLink = 'Yet to be uploaded';
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /help command for user ${username}`);
             const embed = new EmbedBuilder()
                 .setColor('#FFFF00')
                 .setTitle('Helpful Resources and Commands')
                 .setDescription(`Here are the available commands:\n\n`
-                              + `- \`/chant <rounds>\`: Quickly log your japa rounds for today and update your chanting streak.\n`
-                              + `- \`/logpractice\`: Open a form to log your full daily practice details.\n`
+                              + `- \`/chant <rounds>\`: Log your japa rounds for today. This will initiate questions about reading.\n`
                               + `- \`/weeklysummary\`: Shows your practice summary for the last 7 days.\n`
                               + `- \`/monthlysummary\`: Shows your practice summary for the current month.\n`
                               + `- \`/leaderboard <period>\`: Shows the top devotees based on practice scores (weekly or monthly).\n`
                               + `- \`/myscore <period>\`: Shows your personal practice score for a specific period (weekly or monthly).\n`
                               + `- \`/showscore <user>\`: Shows a user\'s chanting streak and practice scores.\n`
                               + `- \`/streakboard\`: Shows the current chanting streak leaderboard with pagination.\n`
+                              + `- \`/sadhanacard\`: Displays your personal Sadhana progress card with streaks and badges (can be used anywhere).\n`
+                              + `- \`/resetcard\`: Resets all your past Sadhana logs, but keeps your streak (Admin only).\n` // Added new command to help
                               + `- \`/streakset <user> <streak>\`: Sets a user\'s chanting streak (Admin only).\n`
                               + `- \`/checkdata <type> [user] [date_string]\`: Check specific data from the database (Admin only).`);
 
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to reply for help command for user ${interaction.user.tag}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to reply for help command for user ${username}`);
             try {
                  await interaction.reply({ embeds: [embed] });
-                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully replied for help command for user ${interaction.user.tag}`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully replied for help command for user ${username}`);
             } catch (replyError) {
-                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error replying for help command for user ${interaction.user.tag}:`, replyError);
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error replying for help command for user ${username}:`, replyError);
             }
         }
         // --- Handle /checkdata command ---
@@ -1558,7 +1508,7 @@ client.on('interactionCreate', async interaction => {
                  await interaction.reply({ embeds: [embed] });
                 return;
             }
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /checkdata command for user ${interaction.user.tag}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /checkdata command for user ${username}`);
 
             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to defer reply for interaction ${interaction.id}`);
             try {
@@ -1597,7 +1547,8 @@ client.on('interactionCreate', async interaction => {
                         if (userStreak) {
                             embed.setTitle(`Streak for ${targetUser.username}`);
                             embed.addFields(
-                                { name: 'Current Streak', value: `${userStreak.streakCount} day(s)` },
+                                { name: 'Current Streak', value: `${userStreak.currentStreak} day(s)` }, // Use currentStreak
+                                { name: 'Longest Streak', value: `${userStreak.longestStreak} day(s)` }, // Show longest streak
                                 { name: 'Last Logged Date Key', value: userStreak.lastLoggedDateKey || 'None' }
                             );
                         } else {
@@ -1630,40 +1581,29 @@ client.on('interactionCreate', async interaction => {
                              return;
                          }
 
-                        const targetDateIST = startOfDay(toZonedTime(parsedDate, IST_TIMEZONE));
+                        const targetDateISTString = format(toZonedTime(parsedDate, IST_TIMEZONE), 'yyyy-MM-dd'); // Ensure DATEONLY string
 
-                         console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Fetching Sadhana log for user ${targetUser.id} on date ${dateString} from database.`);
+                         console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Fetching Sadhana log for user ${targetUser.id} on date ${targetDateISTString} from database.`);
                         const sadhanaLog = await Sadhana.findOne({
                              where: {
                                  userId: targetUser.id,
-                                 date: {
-                                     [Op.gte]: startOfDay(toZonedTime(parsedDate, IST_TIMEZONE)),
-                                     [Op.lte]: endOfDay(toZonedTime(parsedDate, IST_TIMEZONE))
-                                 }
+                                 date: targetDateISTString // Query by DATEONLY string
                              }
                         });
 
                          if (sadhanaLog) {
                              const logData = sadhanaLog.toJSON();
-                             embed.setTitle(`Sadhana Log for ${targetUser.username} on ${format(targetDateIST, 'dd/MM/yyyy')}`);
+                             embed.setTitle(`Sadhana Log for ${targetUser.username} on ${format(parse(targetDateISTString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}`);
                              embed.addFields(
                                  { name: 'Japa Rounds', value: logData.japaRounds?.toString() || '0', inline: true },
-                                 { name: 'Study Hours', value: logData.studyHours?.toFixed(1) || '0.0', inline: true },
-                                 { name: 'Listening Hours', value: logData.listeningHours?.toFixed(1) || '0.0', inline: true },
-                                 { name: 'Reading Details', value: logData.readingDetails || 'None', inline: true },
-                                 { name: 'Waking Time', value: logData.wakingTime ? formatInTimeZone(logData.wakingTime, IST_TIMEZONE, 'hh:mm a zzz') : 'Not Logged', inline: true },
-                                 { name: 'Sleeping Time', value: logData.sleepingTime ? formatInTimeZone(logData.sleepingTime, IST_TIMEZONE, 'hh:mm a zzz') : 'Not Logged', inline: true },
-                                 { name: 'Woke Up Early', value: logData.wokeUpEarlyStatus ? 'Yes' : 'No', inline: true },
-                                 { name: 'Slept Early', value: logData.sleptEarlyStatus ? 'Yes' : 'No', inline: true },
-                                 { name: 'No Meat Eating', value: logData.noMeatEating ? 'Yes' : 'No', inline: true },
-                                 { name: 'No Gambling', value: logData.noGambling ? 'Yes' : 'No', inline: true },
-                                 { name: 'No Illicit Sex', value: logData.noIllicitSex ? 'Yes' : 'No', inline: true },
-                                 { name: 'No Intoxication', value: logData.noIntoxication ? 'Yes' : 'No', inline: true },
-                                 { name: 'Additional Service', value: logData.additionalService || 'None' },
+                                 { name: 'Reading Points', value: logData.readingPoints?.toString() || '0', inline: true },
+                                 { name: 'Hearing Points', value: logData.hearingPoints?.toString() || '0', inline: true },
+                                 { name: 'Chanting Time Bonus', value: logData.chantingTimeBonus?.toString() || '0', inline: true },
+                                 { name: 'Reading Reminder Status', value: logData.readingReminderStatus || 'none', inline: true },
                                  { name: 'Calculated Score', value: logData.score?.toFixed(2) || '0.00', inline: true }
                              );
                          } else {
-                             embedDescription = `No Sadhana log found for ${targetUser.username} on ${format(targetDateIST, 'dd/MM/yyyy')}.`;
+                             embedDescription = `No Sadhana log found for ${targetUser.username} on ${format(parse(targetDateISTString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}.`;
                              embed.setDescription(embedDescription);
                          }
                          break;
@@ -1698,7 +1638,7 @@ client.on('interactionCreate', async interaction => {
         }
          // --- Handle /streakboard command ---
         else if (commandName === 'streakboard') {
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /streakboard command for user ${interaction.user.tag}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /streakboard command for user ${username}`);
             try {
                 await interaction.deferReply();
                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
@@ -1724,7 +1664,7 @@ client.on('interactionCreate', async interaction => {
                       console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply with embed for /streakboard command:`, editError);
                        try {
                            console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
-                           await interaction.followUp({ content: 'Successfully generated streakboard, but failed to update the original message.', ephemeral: true });
+                           await interaction.followUp({ content: 'Successfully generated streakboard, but failed to refresh the original message.', ephemeral: true });
                        } catch (followUpError) {
                            console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
                        }
@@ -1740,7 +1680,7 @@ client.on('interactionCreate', async interaction => {
         }
         // --- Handle /sadhanacard command ---
         else if (commandName === 'sadhanacard') {
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /sadhanacard command for user ${interaction.user.tag}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /sadhanacard command for user ${username}`);
             try {
                 await interaction.deferReply();
                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
@@ -1751,12 +1691,12 @@ client.on('interactionCreate', async interaction => {
             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
             const userId = interaction.user.id;
-            const username = interaction.user.globalName || interaction.user.username; // Get global name or username
 
             try {
                 // Fetch user streak data
                 const userStreak = await getUserStreak(userId);
-                const currentStreak = userStreak ? userStreak.streakCount : 0;
+                const currentStreak = userStreak ? userStreak.currentStreak : 0;
+                const longestStreak = userStreak ? userStreak.longestStreak : 0; // Get longest streak
 
                 // Fetch all Sadhana logs for the user to calculate totals and all-time score
                 const allSadhanaLogs = await Sadhana.findAll({
@@ -1764,9 +1704,9 @@ client.on('interactionCreate', async interaction => {
                 });
 
                 let totalJapaRounds = 0;
-                let totalStudyHours = 0;
-                let totalListeningHours = 0;
-                let totalReadingEntries = 0;
+                let totalReadingPointsAllTime = 0;
+                let totalHearingPointsAllTime = 0;
+                let totalChantingBonusAllTime = 0;
                 let allTimeScore = 0;
                 let loggedDaysCount = 0; // Count of days with at least one log
 
@@ -1774,19 +1714,17 @@ client.on('interactionCreate', async interaction => {
                 for (const log of allSadhanaLogs) {
                     const logData = log.toJSON();
                     totalJapaRounds += logData.japaRounds || 0;
-                    totalStudyHours += logData.studyHours || 0;
-                    totalListeningHours += logData.listeningHours || 0;
-                    if (logData.readingDetails && logData.readingDetails.trim() !== '') {
-                        totalReadingEntries++;
-                    }
-                    allTimeScore += calculateScore(logData);
+                    totalReadingPointsAllTime += logData.readingPoints || 0;
+                    totalHearingPointsAllTime += logData.hearingPoints || 0;
+                    totalChantingBonusAllTime += logData.chantingTimeBonus || 0;
+                    allTimeScore += calculateDailyScore(logData);
                     loggedDaysCount++;
                 }
 
                 // Determine badges
                 const badges = [];
                 if (loggedDaysCount > 0) {
-                    badges.push('🔰 First Step'); // User has logged at least once
+                    badges.push('🔰 First Step (Logged at least once)');
                 }
                 if (currentStreak >= 7) {
                     badges.push('🔥 7-Day Streaker');
@@ -1794,17 +1732,23 @@ client.on('interactionCreate', async interaction => {
                 if (currentStreak >= 30) {
                     badges.push('🌟 30-Day Streaker');
                 }
+                if (currentStreak >= 100) { // New 100-day streak badge
+                    badges.push('💯 Century Streaker');
+                }
                 if (totalJapaRounds >= 100) { // Example threshold
                     badges.push('📿 Japa Seeker (100+ Rounds)');
                 }
-                if (totalStudyHours >= 10) { // Example threshold
-                    badges.push('📚 Study Enthusiast (10+ Hrs)');
+                if (totalJapaRounds >= 1000) { // Example threshold
+                    badges.push('📿 Japa Master (1000+ Rounds)');
                 }
-                if (totalListeningHours >= 5) { // Example threshold
-                    badges.push('🎧 Listening Disciple (5+ Hrs)');
+                if (totalReadingPointsAllTime >= 10) { // Example threshold
+                    badges.push('📚 Study Enthusiast (10+ Reading Logs)');
                 }
-                if (totalReadingEntries >= 10) { // Example threshold
-                    badges.push('📖 Diligent Reader (10+ Days)');
+                if (totalHearingPointsAllTime >= 10) { // Example threshold
+                    badges.push('🎧 Listening Disciple (10+ Hearing Logs)');
+                }
+                if (allTimeScore >= 50) { // Example score threshold
+                    badges.push('✨ Dedicated Devotee (50+ Total Score)');
                 }
 
                 const embed = new EmbedBuilder()
@@ -1814,12 +1758,12 @@ client.on('interactionCreate', async interaction => {
                     .setDescription(`Your spiritual journey at a glance!`)
                     .addFields(
                         { name: 'Current Streak 🔥', value: `${currentStreak} day(s)`, inline: true },
-                        { name: 'Longest Streak 🏆', value: `${userStreak ? userStreak.longestStreak : 0} day(s)`, inline: true }, // Assuming longestStreak is tracked in UserStreak
+                        { name: 'Longest Streak 🏆', value: `${longestStreak} day(s)`, inline: true },
                         { name: 'All-Time Score ✨', value: `${allTimeScore.toFixed(2)} points`, inline: true },
                         { name: 'Total Japa Rounds 📿', value: `${totalJapaRounds}`, inline: true },
-                        { name: 'Total Study Hours 📚', value: `${totalStudyHours.toFixed(2)}`, inline: true },
-                        { name: 'Total Listening Hours 🎧', value: `${totalListeningHours.toFixed(2)}`, inline: true },
-                        { name: 'Badges Earned 🎗️', value: badges.length > 0 ? badges.join('\n') : 'None yet! Keep practicing!' },
+                        { name: 'Total Reading Points 📚', value: `${totalReadingPointsAllTime}`, inline: true },
+                        { name: 'Total Hearing Points 🎧', value: `${totalHearingPointsAllTime}`, inline: true },
+                        { name: 'Badges Earned 🎗️', value: badges.length > 0 ? badges.join('\n') : 'None yet! Keep practicing to earn badges!' },
                     )
                     .setFooter({ text: 'Keep going on your spiritual journey!' })
                     .setTimestamp();
@@ -1847,185 +1791,302 @@ client.on('interactionCreate', async interaction => {
                 await interaction.editReply({ embeds: [embed] });
             }
         }
-    }
-
-    // --- Handle Modal Submit Interactions ---
-    else if (interaction.isModalSubmit()) {
-        console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Modal submission received: ${interaction.customId} for user ${interaction.user.tag}`);
-        if (interaction.customId === 'logPracticeModal') {
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling logPracticeModal submission for user ${interaction.user.tag}`);
-            try {
-                 await interaction.deferReply({ ephemeral: true });
-                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully (ephemeral) for modal submission ${interaction.id}`);
-            } catch (deferError) {
-                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for modal submission ${interaction.id}:`, deferError);
-                 return;
-            }
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for modal submission ${interaction.id}. Proceeding with modal logic.`);
-
-
-            const userId = interaction.user.id;
-            const guildId = interaction.guild?.id;
-            const now = new Date();
-            const todayIST = startOfDay(toZonedTime(now, IST_TIMEZONE));
-
-            const dateString = interaction.fields.getTextInputValue('dateInput');
-            const japaRounds = parseInt(interaction.fields.getTextInputValue('japaRoundsInput'), 10) || 0;
-            const studyHours = parseFloat(interaction.fields.getTextInputValue('studyHoursInput')) || 0;
-            const listeningHours = parseFloat(interaction.fields.getTextInputValue('listeningHoursInput')) || 0;
-            const readingDetails = interaction.fields.getTextInputValue('readingDetailsInput');
-
-
-            const parsedDate = parse(dateString, 'dd/MM/yyyy', new Date());
-
-            if (isNaN(parsedDate.getTime())) {
+        // --- Handle /resetcard command ---
+        else if (commandName === 'resetcard') {
+            if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
                  const embed = new EmbedBuilder()
                      .setColor('#FF0000')
-                     .setTitle('Logging Failed')
-                     .setDescription('Invalid date format. Please use dd/mm/yyyy.');
-                 await interaction.editReply({ embeds: [embed], ephemeral: true });
-                 return;
+                     .setTitle('Permission Denied')
+                     .setDescription('You do not have permission to use this command.');
+                 await interaction.reply({ embeds: [embed], ephemeral: true }); // Keep this ephemeral
+                return;
+            }
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /resetcard command for user ${username}`);
+            try {
+                await interaction.deferReply(); // Defer without ephemeral, as response will be public
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
+            } catch (deferError) {
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for interaction ${interaction.id}:`, deferError);
+                return;
             }
 
-            const logDateIST = startOfDay(toZonedTime(parsedDate, IST_TIMEZONE));
-
-
-            // --- Database Interaction for Modal Submission ---
-            let sadhanaEntry;
-            let created;
-             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database findOrCreate for modal submission for user ${userId} on ${format(logDateIST, 'yyyy-MM-dd')}`);
             try {
-                 [sadhanaEntry, created] = await Sadhana.findOrCreate({
-                    where: { userId: userId, date: logDateIST },
-                    defaults: {
-                        userId: userId,
-                        guildId: guildId,
-                        date: logDateIST,
-                        japaRounds: japaRounds,
-                        studyHours: studyHours,
-                        listeningHours: listeningHours,
-                        readingDetails: readingDetails,
-                        wakingTime: null,
-                        wokeUpEarlyStatus: false,
-                        sleepingTime: null,
-                        sleptEarlyStatus: false,
-                        noMeatEating: false,
-                        noGambling: false,
-                        noIllicitSex: false,
-                        noIntoxication: false,
-                        additionalService: '',
-                        score: 0,
-                    }
+                // Delete all Sadhana logs for ALL users
+                const deletedRows = await Sadhana.destroy({
+                    where: {}, // Empty where clause deletes all rows
                 });
-                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database findOrCreate for modal submission. Created: ${created}`);
-            } catch (dbError) {
-                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during findOrCreate for modal submission:`, dbError);
-                  const embed = new EmbedBuilder()
-                      .setColor('#FF0000')
-                      .setTitle('Logging Failed')
-                      .setDescription('An error occurred while accessing the database. Please try again later.');
-                 await interaction.editReply({ embeds: [embed], ephemeral: true });
+
+                const embed = new EmbedBuilder()
+                    .setColor('#FFD700') // Gold color
+                    .setTitle('Sadhana Card Reset! 🧹 (Admin Action)')
+                    .setDescription(`All past Sadhana logs (${deletedRows} entries) for ALL users have been cleared by ${username}. `
+                                  + `All chanting streaks remain intact for a fresh start! 🎉`);
+
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /resetcard command (global)`);
+                try {
+                    await interaction.editReply({ embeds: [embed] }); // Public reply
+                    console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for /resetcard command (global)`);
+                } catch (editError) {
+                    console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply for /resetcard command (global):`, editError);
+                    // Fallback to followUp, also public
+                    try {
+                        console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
+                        await interaction.followUp({ content: 'Successfully reset all cards, but failed to update the original message. Check console for details.', ephemeral: false });
+                    } catch (followUpError) {
+                        console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
+                    }
+                }
+
+            } catch (error) {
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error during /resetcard command (global):`, error);
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('Sadhana Card Reset Failed (Admin Action)')
+                    .setDescription(`An error occurred while resetting all Sadhana Cards: ${error.message}`);
+                await interaction.editReply({ embeds: [embed] }); // Public reply for error
+            }
+        }
+    }
+
+    // --- Handle Button Interactions ---
+    else if (interaction.isButton()) {
+        const customIdParts = interaction.customId.split('_');
+        const buttonAction = customIdParts[0];
+        const buttonDateString = customIdParts[customIdParts.length - 2]; // Date is second to last
+        const originalCommanderId = customIdParts[customIdParts.length - 1]; // Commander ID is last part
+
+        // Special handling for streakboard pagination buttons as they don't relate to a specific daily log
+        if (interaction.customId.startsWith('streakboard_page_')) {
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling streakboard pagination button: ${interaction.customId}`);
+            await interaction.deferUpdate(); // Defer the button interaction update
+
+            try {
+                const pageNumber = parseInt(customIdParts[2]); // Page number is the third part
+                const userStreaks = await getAllUserStreaks(); // Fetch all data again for pagination
+
+                const totalPages = Math.ceil(userStreaks.length / ENTRIES_PER_PAGE);
+
+                // Reconstruct embed and components
+                const { embeds, components } = await generateStreakboardPage(userStreaks, pageNumber, totalPages, interaction);
+
+                try {
+                    await interaction.editReply({ embeds: embeds, components: components });
+                    console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for streakboard pagination.`);
+                } catch (editError) {
+                    console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply for streakboard pagination:`, editError);
+                    // Add fallback
+                    try {
+                        await interaction.followUp({ content: 'Successfully updated pagination, but failed to refresh the original message.', ephemeral: true });
+                    } catch (followUpError) {
+                        console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
+                    }
+                }
+            } catch (error) {
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error during streakboard pagination button:`, error);
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('Streak Leaderboard Failed')
+                    .setDescription(`An error occurred while fetching streak data: ${error.message}`);
+                await interaction.editReply({ embeds: [embed], components: [] }); // Remove buttons on error
+            }
+            return; // Exit after handling streakboard buttons
+        }
+
+        // --- Restrict daily action buttons to the original commander ---
+        if (interaction.user.id !== originalCommanderId) {
+            await interaction.reply({ content: 'You can only interact with your own Sadhana log buttons.', ephemeral: true });
+            return;
+        }
+
+        console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling daily action button: ${interaction.customId} for user ${username} for date ${buttonDateString}`);
+        await interaction.deferUpdate(); // Defer the button interaction
+
+        const sadhanaLog = await Sadhana.findOne({
+            where: { userId: originalCommanderId, date: buttonDateString } // Use date and commanderId from custom ID
+        });
+
+        if (!sadhanaLog) {
+            // This button might be from a past day for which the log was cleared, or an invalid date.
+            await interaction.followUp({ content: 'This button refers to a log entry that no longer exists or is too old to modify directly. Please use `/chant` to create a new log for today.', ephemeral: true });
+            return;
+        }
+
+        // --- Handle "Extra Rounds" Button ---
+        if (buttonAction === 'extra' && customIdParts[1] === 'rounds' && customIdParts[2] === 'button') {
+            try {
+                // Generate a random number of rounds for the challenge (1 to 5)
+                const challengeRounds = Math.floor(Math.random() * 5) + 1;
+
+                const funnyResponse = extraRoundsFunnyResponses[Math.floor(Math.random() * extraRoundsFunnyResponses.length)];
+
+                const embed = new EmbedBuilder()
+                    .setColor('#FFA500') // Orange for fun
+                    .setTitle(`Japa Challenge! 🎉`)
+                    .setDescription(`${funnyResponse}\n\n**${username}** clicked the button and received a challenge to chant **${challengeRounds}** extra rounds for ${format(parse(buttonDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}! Hare Krishna! 🙏`);
+
+                await interaction.followUp({ embeds: [embed], ephemeral: false }); // Visible to everyone
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] User ${userId} was challenged to chant ${challengeRounds} extra rounds for date ${buttonDateString}.`);
+
+            } catch (error) {
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error handling extra rounds button for user ${userId} on date ${buttonDateString}:`, error);
+                await interaction.followUp({ content: 'There was an error with the extra rounds challenge. Please try again later.', ephemeral: true });
+            }
+        }
+        // --- Handle Reading Prompt Buttons (from /chant initial reply) ---
+        else if (buttonAction === 'read') {
+            let responseMessage = '';
+            let newReminderStatus = sadhanaLog.readingReminderStatus; // Keep current status by default
+            let readingAwarded = false;
+
+            if (sadhanaLog.readingPoints > 0) {
+                 responseMessage = 'You have already logged reading points for this day!';
+            } else {
+                if (customIdParts[1] === 'yes') {
+                    sadhanaLog.readingPoints = 1;
+                    readingAwarded = true;
+                    responseMessage = 'Fantastic! You earned 1 point for reading today. Keep it up! 🌟';
+                    newReminderStatus = 'completed'; // Mark as completed
+                } else if (customIdParts[1] === 'no' && customIdParts[2] === 'today') {
+                    responseMessage = 'Okay, no worries! Maybe another time. 🙌';
+                    newReminderStatus = 'completed'; // Mark as completed
+                } else if (customIdParts[1] === 'later') {
+                    responseMessage = 'Got it! I\'ll send you a reminder around 9 PM IST. Don\'t forget to read! ⏰';
+                    newReminderStatus = 'pending_dm_9pm'; // Set reminder state
+                }
+            }
+
+            sadhanaLog.readingReminderStatus = newReminderStatus;
+            sadhanaLog.score = calculateDailyScore(sadhanaLog.toJSON()); // Recalculate score
+
+            try {
+                await sadhanaLog.save();
+                // Send ephemeral follow-up to user
+                await interaction.followUp({ content: `**Reading Update for ${format(parse(buttonDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}:** ${responseMessage}`, ephemeral: true });
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reading choice handled for user ${userId} on ${buttonDateString}: ${interaction.customId}. Points: ${readingAwarded ? 1 : 0}`);
+            } catch (error) {
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error saving reading choice for user ${userId} on date ${buttonDateString}:`, error);
+                await interaction.followUp({ content: 'There was an error saving your reading choice. Please try again later.', ephemeral: true });
+            }
+        }
+        // --- Handle Hearing/Sravanam Buttons (from 9 PM DM cron) ---
+        else if (buttonAction === 'sravanam') {
+            if (sadhanaLog.hearingPoints > 0) {
+                 await interaction.followUp({ content: 'You have already logged hearing points for this day!', ephemeral: true });
                  return;
             }
 
-            if (!created) {
-                sadhanaEntry.japaRounds = japaRounds;
-                sadhanaEntry.studyHours = studyHours;
-                sadhanaEntry.listeningHours = listeningHours;
-                sadhanaEntry.readingDetails = readingDetails;
+            if (customIdParts[1] === 'yes') {
+                sadhanaLog.hearingPoints = 1;
+                sadhanaLog.score = calculateDailyScore(sadhanaLog.toJSON()); // Recalculate score
+                await sadhanaLog.save();
+                await interaction.followUp({ content: `Excellent! You earned 1 point for Sravanam for ${format(parse(buttonDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}. Keep connecting! 🙏`, ephemeral: true });
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Sravanam Yes handled for user ${userId} on ${buttonDateString}.`);
+            } else if (customIdParts[1] === 'no') {
+                await interaction.followUp({ content: `Okay, no worries. Try to make time for Sravanam for ${format(parse(buttonDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')} tomorrow! ✨`, ephemeral: true });
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Sravanam No handled for user ${userId} on ${buttonDateString}.`);
             }
+             // Since this is a DM, editing the message to disable buttons after deferUpdate is generally fine
+             const updatedComponents = interaction.message.components.map(row =>
+                 new ActionRowBuilder().addComponents(
+                     row.components.map(button =>
+                         ButtonBuilder.from(button).setDisabled(true)
+                     )
+                 )
+             );
+             await interaction.editReply({ components: updatedComponents });
 
-            sadhanaEntry.score = calculateScore(sadhanaEntry.toJSON());
 
-             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Starting database save for modal submission for user ${userId} on ${format(logDateIST, 'yyyy-MM-dd')}`);
-            try {
-                await sadhanaEntry.save();
-                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database save for modal submission.`);
-            } catch (dbError) {
-                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during save for modal submission:`, dbError);
-                  const embed = new EmbedBuilder()
-                      .setColor('#FF0000')
-                      .setTitle('Logging Failed')
-                      .setDescription('An error occurred while saving to the database. Please try again later.');
-                 await interaction.editReply({ embeds: [embed], ephemeral: true });
+        }
+        // --- Handle 9 PM Reading Reminder Buttons ---
+        else if (buttonAction === 'reading' && customIdParts[1] === '9pm') {
+            if (sadhanaLog.readingPoints > 0) {
+                 await interaction.followUp({ content: 'You have already logged reading points for this day!', ephemeral: true });
                  return;
             }
 
-            // --- Streak Logic for Modal Submission ---
-             if (format(logDateIST, 'yyyy-MM-dd') === format(todayIST, 'yyyy-MM-dd')) {
-                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Log date is today. Updating streak for user ${userId}.`);
-                 try {
-                      const userStreak = await findOrCreateAndUpdateUserStreak(userId, (currentUserStreak) => {
-                          let currentStreak = currentUserStreak ? currentUserStreak.streakCount : 0;
-                          const lastLoggedDateKey = currentUserStreak ? currentUserStreak.lastLoggedDateKey : null;
-                          let newStreak = currentStreak;
+            if (customIdParts[2] === 'yes') {
+                sadhanaLog.readingPoints = 1;
+                sadhanaLog.score = calculateDailyScore(sadhanaLog.toJSON()); // Recalculate score
+                sadhanaLog.readingReminderStatus = 'completed';
+                await sadhanaLog.save();
+                await interaction.followUp({ content: `Wonderful! You earned 1 point for reading for ${format(parse(buttonDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}. 🙏`, ephemeral: true });
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reading 9 PM Yes handled for user ${userId} on ${buttonDateString}.`);
+            } else if (customIdParts[2] === 'no') {
+                sadhanaLog.readingReminderStatus = 'completed'; // No more reminders
+                await sadhanaLog.save();
+                await interaction.followUp({ content: 'Understood. Maybe next time! ✨', ephemeral: true });
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reading 9 PM No handled for user ${userId} on ${buttonDateString}.`);
+            } else if (customIdParts[2] === 'now') {
+                // This is the "I will read now!" button. Send final prompt.
+                sadhanaLog.readingReminderStatus = 'pending_dm_final'; // Mark for final check
+                await sadhanaLog.save();
 
-                          const lastLoggedDate = lastLoggedDateKey ? startOfDay(parse(lastLoggedDateKey, 'yyyy-MM-dd', new Date())) : null;
+                const embed = new EmbedBuilder()
+                    .setColor('#FF69B4') // Hot Pink
+                    .setTitle('Final Reading Check! 🧐')
+                    .setDescription(`Have you completed your reading session for ${format(parse(buttonDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')} now?`)
+                    .setFooter({ text: 'This is the last reminder for this day.' });
 
-                          if (todayIST && !isNaN(todayIST.getTime())) {
-                              if (lastLoggedDate && !isNaN(lastLoggedDate.getTime())) {
-                                  const dayDifference = differenceInCalendarDays(todayIST, lastLoggedDate);
+                const row = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`final_read_confirm_${buttonDateString}_${originalCommanderId}`) // Final confirm
+                            .setLabel('Yes, I read it!')
+                            .setStyle(ButtonStyle.Success),
+                        new ButtonBuilder()
+                            .setCustomId(`final_read_decline_${buttonDateString}_${originalCommanderId}`) // Final decline
+                            .setLabel('No, I still haven\'t.')
+                            .setStyle(ButtonStyle.Danger),
+                    );
+                try {
+                    await interaction.user.send({ embeds: [embed], components: [row] });
+                    await interaction.followUp({ content: 'Okay, check your DMs for the final reading check!', ephemeral: true });
+                    console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Sent final reading check DM to ${userId} for date ${buttonDateString}.`);
+                } catch (dmError) {
+                    console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send final reading check DM to ${userId} for date ${buttonDateString}:`, dmError);
+                    await interaction.followUp({ content: 'Could not send the final reading reminder. Please ensure your DMs are open.', ephemeral: true });
+                }
+            }
+             // Disable 9 PM reading buttons after action
+             const updatedComponents = interaction.message.components.map(row =>
+                 new ActionRowBuilder().addComponents(
+                     row.components.map(button =>
+                         ButtonBuilder.from(button).setDisabled(true)
+                     )
+                 )
+             );
+             await interaction.editReply({ components: updatedComponents });
 
-                                  if (dayDifference === 1) {
-                                      newStreak = currentStreak + 1;
-                                  } else if (dayDifference > 1) {
-                                      newStreak = 1;
-                                  } else if (dayDifference <= 0 && format(todayIST, 'yyyy-MM-dd') !== lastLoggedDateKey) {
-                                      newStreak = currentStreak;
-                                  }
-                              } else {
-                                  newStreak = 1;
-                              }
-
-                               if (!lastLoggedDateKey || (lastLoggedDate && todayIST >= lastLoggedDate)) {
-                                    return { newStreakCount: newStreak, newLastLoggedDateKey: format(todayIST, 'yyyy-MM-dd') };
-                               } else {
-                                    return { newStreakCount: currentStreak, newLastLoggedDateKey: lastLoggedDateKey };
-                               }
-
-
-                          } else {
-                               console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Invalid todayIST date for streak logic (modal): ${todayIST}`);
-                               return { newStreakCount: currentStreak, newLastLoggedDateKey: lastLoggedDateKey };
-                          }
-                      });
-                       console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished updating streak for user ${userId} from modal.`);
-                 } catch (dbError) {
-                      console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during streak update (modal):`, dbError);
-                 }
-             } else {
-                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Log date (${format(logDateIST, 'yyyy-MM-dd')}) is not today. Skipping streak update for user ${userId}.`);
-             }
-
-
-            const embed = new EmbedBuilder()
-                .setColor('#00FF00')
-                .setTitle('Practice Logged Successfully!')
-                .setDescription(`Your practice for ${format(logDateIST, 'dd/MM/yyyy')} has been logged.`);
-
-            embed.addFields(
-                { name: 'Japa Rounds', value: japaRounds.toString(), inline: true },
-                { name: 'Study Hours', value: studyHours.toFixed(2), inline: true },
-                { name: 'Listening Hours', value: listeningHours.toFixed(2), inline: true },
-                { name: 'Reading Details', value: readingDetails || 'None' },
-                { name: 'Calculated Score', value: sadhanaEntry.score.toFixed(2), inline: true }
-            );
-
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for modal submission for user ${userId}`);
-            try {
-                 await interaction.editReply({ embeds: [embed], ephemeral: true });
-                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for modal submission for user ${userId}`);
-            } catch (editError) {
-                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply for modal submission for user ${userId}:`, editError);
-                 try {
-                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
-                     await interaction.followUp({ content: 'Successfully logged your practice, but failed to update the original message.', ephemeral: true });
-                 } catch (followUpError) {
-                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
-                 }
+        }
+        // --- Handle Final Reading Confirmation Buttons (from DM) ---
+        else if (buttonAction === 'final' && customIdParts[1] === 'read') {
+            if (sadhanaLog.readingPoints > 0) {
+                 await interaction.followUp({ content: 'You have already logged reading points for this day!', ephemeral: true });
+                 return;
             }
 
-
+            if (customIdParts[2] === 'confirm') {
+                sadhanaLog.readingPoints = 1;
+                sadhanaLog.score = calculateDailyScore(sadhanaLog.toJSON()); // Recalculate score
+                sadhanaLog.readingReminderStatus = 'completed'; // Final status
+                await sadhanaLog.save();
+                await interaction.followUp({ content: `Fantastic! Your reading has been logged for ${format(parse(buttonDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}. Hare Krishna! 🎉`, ephemeral: true });
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Final Reading Confirmed for user ${userId} on ${buttonDateString}.`);
+            } else if (customIdParts[2] === 'decline') {
+                sadhanaLog.readingReminderStatus = 'completed'; // Final status
+                await sadhanaLog.save();
+                await interaction.followUp({ content: 'Understood. We\'ll catch it next time! Your determination is still appreciated. 💪', ephemeral: true });
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Final Reading Declined for user ${userId} on ${buttonDateString}.`);
+            }
+             // Disable final reading buttons after action
+             const updatedComponents = interaction.message.components.map(row =>
+                 new ActionRowBuilder().addComponents(
+                     row.components.map(button =>
+                         ButtonBuilder.from(button).setDisabled(true)
+                     )
+                 )
+             );
+             await interaction.editReply({ components: updatedComponents });
         }
     }
 });
