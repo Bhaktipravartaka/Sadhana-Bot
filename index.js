@@ -245,7 +245,7 @@ const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.CLIENT_ID;
 const guildId = process.env.GUILD_ID; // Your server's ID (Guild ID) for faster testing
 const announcementChannelId = process.env.ANNOUNCEMENT_CHANNEL_ID; // Add this to your .env file
-const SADHANA_CHANNEL_ID = '1118899025891037265'; // Specific channel for Sadhana commands
+const SADHANA_CHANNEL_ID = '1317679585076318218'; // Specific channel for Sadhana commands
 
 // Define the timezone for IST
 const IST_TIMEZONE = 'Asia/Kolkata'; // IANA timezone name for India Standard Time
