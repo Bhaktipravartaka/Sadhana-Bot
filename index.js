@@ -764,11 +764,24 @@ client.on('interactionCreate', async interaction => {
             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /chant command for user ${username}`);
             // Defer the reply immediately
             try {
-                await interaction.deferReply();
+                await interaction.deferReply({ ephemeral: false }); // Ensure it's not ephemeral if you plan public followUps
                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
             } catch (deferError) {
                  console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for interaction ${interaction.id}:`, deferError);
-                 return;
+                 // If defer fails, we cannot proceed with editReply or followUp on this interaction.
+                 // Attempt a direct ephemeral reply as a last resort if deferral failed, to inform the user.
+                 try {
+                     // Check if interaction is still valid to reply to
+                     if (!interaction.replied && !interaction.deferred) {
+                        await interaction.reply({ content: 'Sorry, I could not process your command right now. Please try again.', ephemeral: true });
+                     } else if (interaction.deferred && !interaction.replied) {
+                         // This case shouldn't happen if deferError was caught, but as a safeguard.
+                         await interaction.followUp({ content: 'Sorry, I could not process your command right now. Please try again. (After deferral error)', ephemeral: true });
+                     }
+                 } catch (fallbackError) {
+                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Critical: Failed to send fallback reply after deferral error:`, fallbackError);
+                 }
+                 return; // Exit if deferral failed
             }
             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
@@ -781,7 +794,13 @@ client.on('interactionCreate', async interaction => {
                      .setColor('#FF0000')
                      .setTitle('Chanting Log Failed')
                      .setDescription('Number of rounds cannot be negative.');
-                 await interaction.editReply({ embeds: [embed] });
+                 // Since we already deferred, use editReply
+                 try {
+                     await interaction.editReply({ embeds: [embed] });
+                     console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Negative rounds error reply sent successfully.`);
+                 } catch (replyError) {
+                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error sending negative rounds error reply:`, replyError);
+                 }
                  return;
             }
 
@@ -824,7 +843,12 @@ client.on('interactionCreate', async interaction => {
                      .setColor('#FF0000')
                      .setTitle('Chanting Log Failed')
                      .setDescription('An error occurred while accessing the Sadhana database. Please try again later.');
-                 await interaction.editReply({ embeds: [embed] });
+                 try {
+                     await interaction.editReply({ embeds: [embed] });
+                     console.log(`[${new Date().toISOString()}] [PID:${process.pid}] DB findOrCreate error reply sent successfully.`);
+                 } catch (replyError) {
+                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error sending DB findOrCreate error reply:`, replyError);
+                 }
                  return;
             }
 
@@ -847,7 +871,12 @@ client.on('interactionCreate', async interaction => {
                      .setColor('#FF0000')
                      .setTitle('Chanting Log Failed')
                      .setDescription('An error occurred while saving Sadhana data to the database. Please try again later.');
-                 await interaction.editReply({ embeds: [embed] });
+                 try {
+                     await interaction.editReply({ embeds: [embed] });
+                     console.log(`[${new Date().toISOString()}] [PID:${process.pid}] DB save error reply sent successfully.`);
+                 } catch (replyError) {
+                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error sending DB save error reply:`, replyError);
+                 }
                  return;
             }
 
@@ -886,7 +915,12 @@ client.on('interactionCreate', async interaction => {
                       .setColor('#FF0000')
                       .setTitle('Chanting Log Failed')
                       .setDescription('An error occurred while updating streak data. Please try again later.');
-                  await interaction.editReply({ embeds: [embed] });
+                  try {
+                      await interaction.editReply({ embeds: [embed] });
+                      console.log(`[${new Date().toISOString()}] [PID:${process.pid}] DB streak update error reply sent successfully.`);
+                  } catch (replyError) {
+                      console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error sending DB streak update error reply:`, replyError);
+                  }
                   return;
             }
 
@@ -916,13 +950,8 @@ client.on('interactionCreate', async interaction => {
                  console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for /chant command for user ${userId}`);
             } catch (editError) {
                  console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply for /chant command for user ${userId}:`, editError);
-                 try {
-                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
-                     await interaction.followUp({ content: 'Successfully logged your chanting, but there was an issue updating the original message.', ephemeral: true });
-                 } catch (followUpError) {
-                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
-                 }
-                 return; // Stop execution if initial reply fails
+                 // No return here, as we still want to try to send the reading prompt as a followUp.
+                 // This ensures the first part of the response is handled, even if the second fails.
             }
 
             // --- Send separate follow-up message for Reading Prompt ---
@@ -956,6 +985,9 @@ client.on('interactionCreate', async interaction => {
                  console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully sent followUp for /chant command with reading prompt for user ${userId}`);
             } catch (followUpError) {
                  console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error sending followUp for /chant command with reading prompt for user ${userId}:`, followUpError);
+                 // If both editReply and followUp fail, and deferral succeeded,
+                 // the user might still see "Bot is thinking..." indefinitely.
+                 // This is a difficult scenario to recover from in a single interaction.
             }
         }
         // ... (other slash commands) ...
