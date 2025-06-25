@@ -645,24 +645,25 @@ client.once('ready', () => {
         const now = new Date();
         const todayISTDate = format(toZonedTime(now, IST_TIMEZONE), 'yyyy-MM-dd');
 
-        // Fetch all users who have logged Sadhana today or have a pending reminder
-        const usersToRemind = await Sadhana.findAll({
-            where: {
-                date: todayISTDate,
-                [Op.or]: [
-                    { hearingPoints: 0 }, // Haven't logged hearing points yet
-                    { readingReminderStatus: { [Op.in]: ['pending_dm_9pm', 'pending_dm_final'] } } // Have a pending reading reminder
-                ]
-            }
-        });
+        // Fetch ALL users from UserStreak to send Sravanam reminder to everyone.
+        // For reading reminders, we still filter for those who explicitly said "will read later".
+        const allUsers = await UserStreak.findAll();
 
-        for (const sadhanaLog of usersToRemind) {
-            const userId = sadhanaLog.userId;
-            const user = await client.users.fetch(userId).catch(e => console.warn(`Could not fetch user ${userId} for 9 PM reminder: ${e.message}`));
+        for (const userEntry of allUsers) {
+            const userId = userEntry.userId;
+            const user = await client.users.fetch(userId).catch(e => {
+                console.warn(`Could not fetch user ${userId} for 9 PM reminder: ${e.message}`);
+                return null;
+            });
             if (!user) continue;
 
-            // --- Hearing/Sravanam Reminder ---
-            if (sadhanaLog.hearingPoints === 0) {
+            // Fetch sadhana log for today for this specific user
+            const sadhanaLog = await Sadhana.findOne({
+                where: { userId: userId, date: todayISTDate }
+            });
+
+            // --- Hearing/Sravanam Reminder (to all users if not already logged) ---
+            if (!sadhanaLog || sadhanaLog.hearingPoints === 0) {
                 try {
                     const embed = new EmbedBuilder()
                         .setColor('#FFD700')
@@ -673,11 +674,11 @@ client.once('ready', () => {
                     const row = new ActionRowBuilder()
                         .addComponents(
                             new ButtonBuilder()
-                                .setCustomId(`sravanam_yes_${todayISTDate}_${userId}`) // Add commanderId
+                                .setCustomId(`sravanam_yes_${todayISTDate}_${userId}`)
                                 .setLabel('Yes, I have!')
                                 .setStyle(ButtonStyle.Success),
                             new ButtonBuilder()
-                                .setCustomId(`sravanam_no_${todayISTDate}_${userId}`) // Add commanderId
+                                .setCustomId(`sravanam_no_${todayISTDate}_${userId}`)
                                 .setLabel('No, I haven\'t.')
                                 .setStyle(ButtonStyle.Danger),
                         );
@@ -689,8 +690,8 @@ client.once('ready', () => {
                 }
             }
 
-            // --- "Will Read Later" Reminder ---
-            if (sadhanaLog.readingReminderStatus === 'pending_dm_9pm') {
+            // --- "Will Read Later" Reminder (only if user explicitly chose it) ---
+            if (sadhanaLog && sadhanaLog.readingReminderStatus === 'pending_dm_9pm') {
                 try {
                     const embed = new EmbedBuilder()
                         .setColor('#FFB6C1')
@@ -701,22 +702,23 @@ client.once('ready', () => {
                     const row = new ActionRowBuilder()
                         .addComponents(
                             new ButtonBuilder()
-                                .setCustomId(`reading_9pm_yes_${todayISTDate}_${userId}`) // Add commanderId
+                                .setCustomId(`reading_9pm_yes_${todayISTDate}_${userId}`)
                                 .setLabel('Yes, I read it!')
                                 .setStyle(ButtonStyle.Success),
                             new ButtonBuilder()
-                                .setCustomId(`reading_9pm_no_${todayISTDate}_${userId}`) // Add commanderId
+                                .setCustomId(`reading_9pm_no_${todayISTDate}_${userId}`)
                                 .setLabel('No, I didn\'t read.')
                                 .setStyle(ButtonStyle.Danger),
                             new ButtonBuilder()
-                                .setCustomId(`reading_9pm_now_${todayISTDate}_${userId}`) // Add commanderId
+                                .setCustomId(`reading_9pm_now_${todayISTDate}_${userId}`)
                                 .setLabel('I will read now!')
                                 .setStyle(ButtonStyle.Primary),
                         );
 
                     await user.send({ embeds: [embed], components: [row] });
+                    // Update status for the *existing* log entry, not creating a new one
                     sadhanaLog.readingReminderStatus = 'pending_dm_final'; // Move to next state
-                    await sadhanaLog.save();
+                    await sadhanaLog.save(); // Save the updated status
                     console.log(`[${new Date().toISOString()}] Sent 9 PM reading reminder to ${userId}`);
                 } catch (dmError) {
                     console.error(`[${new Date().toISOString()}] Failed to send 9 PM reading reminder to ${userId}:`, dmError);
@@ -889,7 +891,7 @@ client.on('interactionCreate', async interaction => {
             }
 
 
-            // --- Build Initial Reply Embed with Extra Rounds Button & Reading Prompt ---
+            // --- Build Initial Reply Embed ---
             const initialEmbed = new EmbedBuilder()
                 .setColor('#00FF00')
                 .setTitle('Japa Rounds Logged! 🎶')
@@ -904,6 +906,26 @@ client.on('interactionCreate', async interaction => {
                 .setStyle(ButtonStyle.Primary)
                 .setEmoji('➕'); // Plus sign emoji
 
+            const initialComponents = [
+                new ActionRowBuilder().addComponents(extraRoundsButton)
+            ];
+
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /chant command with Japa Rounds Logged embed for user ${userId}`);
+            try {
+                 await interaction.editReply({ embeds: [initialEmbed], components: initialComponents });
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for /chant command for user ${userId}`);
+            } catch (editError) {
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply for /chant command for user ${userId}:`, editError);
+                 try {
+                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
+                     await interaction.followUp({ content: 'Successfully logged your chanting, but there was an issue updating the original message.', ephemeral: true });
+                 } catch (followUpError) {
+                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
+                 }
+                 return; // Stop execution if initial reply fails
+            }
+
+            // --- Send separate follow-up message for Reading Prompt ---
             const readingPromptEmbed = new EmbedBuilder()
                 .setColor('#87CEEB') // Sky Blue
                 .setTitle('Have you read any spiritual book today? 📚')
@@ -928,23 +950,12 @@ client.on('interactionCreate', async interaction => {
                         .setEmoji('⏰'),
                 );
 
-            const initialComponents = [
-                new ActionRowBuilder().addComponents(extraRoundsButton),
-                readingPromptRow
-            ];
-
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /chant command with buttons for user ${userId}`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to send followUp for /chant command with reading prompt for user ${userId}`);
             try {
-                 await interaction.editReply({ embeds: [initialEmbed, readingPromptEmbed], components: initialComponents });
-                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for /chant command for user ${userId}`);
-            } catch (editError) {
-                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply for /chant command for user ${userId}:`, editError);
-                 try {
-                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
-                     await interaction.followUp({ content: 'Successfully logged your chanting, but failed to update the original message. Please check DM for reading reminder.', ephemeral: true });
-                 } catch (followUpError) {
-                     console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
-                 }
+                 await interaction.followUp({ embeds: [readingPromptEmbed], components: [readingPromptRow] });
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully sent followUp for /chant command with reading prompt for user ${userId}`);
+            } catch (followUpError) {
+                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error sending followUp for /chant command with reading prompt for user ${userId}:`, followUpError);
             }
         }
         // ... (other slash commands) ...
@@ -1967,25 +1978,7 @@ client.on('interactionCreate', async interaction => {
                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error saving reading choice for user ${userId} on date ${buttonDateString}:`, error);
                 await interaction.followUp({ content: 'There was an error saving your reading choice. Please try again later.', ephemeral: true });
             }
-        }
-        // --- Handle Hearing/Sravanam Buttons (from 9 PM DM cron) ---
-        else if (buttonAction === 'sravanam') {
-            if (sadhanaLog.hearingPoints > 0) {
-                 await interaction.followUp({ content: 'You have already logged hearing points for this day!', ephemeral: true });
-                 return;
-            }
-
-            if (customIdParts[1] === 'yes') {
-                sadhanaLog.hearingPoints = 1;
-                sadhanaLog.score = calculateDailyScore(sadhanaLog.toJSON()); // Recalculate score
-                await sadhanaLog.save();
-                await interaction.followUp({ content: `Excellent! You earned 1 point for Sravanam for ${format(parse(buttonDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}. Keep connecting! 🙏`, ephemeral: true });
-                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Sravanam Yes handled for user ${userId} on ${buttonDateString}.`);
-            } else if (customIdParts[1] === 'no') {
-                await interaction.followUp({ content: `Okay, no worries. Try to make time for Sravanam for ${format(parse(buttonDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')} tomorrow! ✨`, ephemeral: true });
-                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Sravanam No handled for user ${userId} on ${buttonDateString}.`);
-            }
-             // Since this is a DM, editing the message to disable buttons after deferUpdate is generally fine
+            // Disable the reading prompt buttons after a choice has been made
              const updatedComponents = interaction.message.components.map(row =>
                  new ActionRowBuilder().addComponents(
                      row.components.map(button =>
@@ -1994,13 +1987,81 @@ client.on('interactionCreate', async interaction => {
                  )
              );
              await interaction.editReply({ components: updatedComponents });
+        }
+        // --- Handle Hearing/Sravanam Buttons (from 9 PM DM cron) ---
+        else if (buttonAction === 'sravanam') {
+            // Ensure there's a sadhana log for today, create if not
+            let sadhanaLogToday = await Sadhana.findOne({
+                where: { userId: originalCommanderId, date: buttonDateString }
+            });
 
+            if (!sadhanaLogToday) {
+                // If no log exists for today, create a new one with default values
+                sadhanaLogToday = await Sadhana.create({
+                    userId: originalCommanderId,
+                    guildId: null, // DMs don't have a guild ID
+                    date: buttonDateString,
+                    japaRounds: 0,
+                    readingPoints: 0,
+                    hearingPoints: 0, // This will be set below
+                    chantingTimeBonus: 0,
+                    readingReminderStatus: 'none',
+                    score: 0,
+                });
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Created new Sadhana log for user ${originalCommanderId} on ${buttonDateString} for Sravanam response.`);
+            }
 
+            if (sadhanaLogToday.hearingPoints > 0) {
+                 await interaction.followUp({ content: 'You have already logged hearing points for this day!', ephemeral: true });
+                 // Still disable buttons even if already logged
+                 const updatedComponents = interaction.message.components.map(row =>
+                     new ActionRowBuilder().addComponents(
+                         row.components.map(button =>
+                             ButtonBuilder.from(button).setDisabled(true)
+                         )
+                     )
+                 );
+                 await interaction.editReply({ components: updatedComponents });
+                 return;
+            }
+
+            if (customIdParts[1] === 'yes') {
+                sadhanaLogToday.hearingPoints = 1;
+                sadhanaLogToday.score = calculateDailyScore(sadhanaLogToday.toJSON()); // Recalculate score
+                await sadhanaLogToday.save();
+                await interaction.followUp({ content: `Excellent! You earned 1 point for Sravanam for ${format(parse(buttonDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}. Keep connecting! 🙏`, ephemeral: true });
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Sravanam Yes handled for user ${userId} on ${buttonDateString}.`);
+            } else if (customIdParts[1] === 'no') {
+                // If they say no, still update the log to prevent repeated prompts if no other action is taken
+                sadhanaLogToday.hearingPoints = 0; // Explicitly 0
+                sadhanaLogToday.score = calculateDailyScore(sadhanaLogToday.toJSON()); // Recalculate score
+                await sadhanaLogToday.save();
+                await interaction.followUp({ content: `Okay, no worries. Try to make time for Sravanam for ${format(parse(buttonDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')} tomorrow! ✨`, ephemeral: true });
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Sravanam No handled for user ${userId} on ${buttonDateString}.`);
+            }
+             // Disable Sravanam buttons after action
+             const updatedComponents = interaction.message.components.map(row =>
+                 new ActionRowBuilder().addComponents(
+                     row.components.map(button =>
+                         ButtonBuilder.from(button).setDisabled(true)
+                     )
+                 )
+             );
+             await interaction.editReply({ components: updatedComponents });
         }
         // --- Handle 9 PM Reading Reminder Buttons ---
         else if (buttonAction === 'reading' && customIdParts[1] === '9pm') {
             if (sadhanaLog.readingPoints > 0) {
                  await interaction.followUp({ content: 'You have already logged reading points for this day!', ephemeral: true });
+                 // Still disable buttons even if already logged
+                 const updatedComponents = interaction.message.components.map(row =>
+                     new ActionRowBuilder().addComponents(
+                         row.components.map(button =>
+                             ButtonBuilder.from(button).setDisabled(true)
+                         )
+                     )
+                 );
+                 await interaction.editReply({ components: updatedComponents });
                  return;
             }
 
@@ -2062,6 +2123,15 @@ client.on('interactionCreate', async interaction => {
         else if (buttonAction === 'final' && customIdParts[1] === 'read') {
             if (sadhanaLog.readingPoints > 0) {
                  await interaction.followUp({ content: 'You have already logged reading points for this day!', ephemeral: true });
+                 // Still disable buttons even if already logged
+                 const updatedComponents = interaction.message.components.map(row =>
+                     new ActionRowBuilder().addComponents(
+                         row.components.map(button =>
+                             ButtonBuilder.from(button).setDisabled(true)
+                         )
+                     )
+                 );
+                 await interaction.editReply({ components: updatedComponents });
                  return;
             }
 
