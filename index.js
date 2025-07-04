@@ -1,4 +1,11 @@
 // Load environment variables from .env file
+// At the very top of your index.js
+process.on('unhandledRejection', error => {
+    console.error('Unhandled promise rejection:', error);
+    // Optionally, you might want to exit the process here if it's a critical error
+    // process.exit(1);
+});
+
 require('dotenv').config();
 
 const http = require('http'); // Keep for Render health check
