@@ -171,7 +171,7 @@ async function findOrCreateAndUpdateUserStreak(userId, updateLogicFn) {
         }
 
         await userStreakInstance.save();
-        console.log(`User streak ${created ? 'created' : 'updated'} for user ${userId}.`);
+        console.log(`[${new Date().toISOString()}] [PID:${process.pid}] User streak saved for ${userId}. Current streak: ${userStreakInstance.currentStreak}, Longest streak: ${userStreakInstance.longestStreak}`); // Added log
         return userStreakInstance.toJSON();
 
      } catch (err) {
@@ -338,31 +338,16 @@ const commands = [
                 description: 'Date of the log (e.g., 07/05/2025) (required for User Log by Date).',
                 required: false, // Make required true in handler logic
             },
-            // Kept these options but made them not required, handler logic will prioritize date_string
-             {
-                name: 'day',
-                type: 4, // INTEGER
-                description: 'Day of the month (optional, use date_string instead).',
-                required: false,
-            },
-            {
-                name: 'month',
-                type: 4, // INTEGER
-                description: 'Month (1-12) (optional, use date_string instead).',
-                required: false,
-            },
-            {
-                name: 'year',
-                type: 4, // INTEGER
-                description: 'Year (e.g., 2023) (optional, use date_string instead).',
-                required: false,
-            },
         ],
         default_member_permissions: PermissionsBitField.Flags.Administrator.toString(),
     },
      {
         name: 'streakboard',
         description: 'Shows the current chanting streak leaderboard.',
+    },
+    {
+        name: 'sadhanacard',
+        description: 'Shows your personal chanting progress card with streaks and badges.',
     },
 ];
 
@@ -582,8 +567,8 @@ client.on('interactionCreate', async interaction => {
     const todayISTDateString = format(todayIST, 'yyyy-MM-dd'); // Use DATEONLY format for consistency with DB
 
     // --- Command Channel Restriction ---
-    // All commands are restricted
-    if (interaction.isCommand()) {
+    // All commands are restricted except sadhanacard (which can be used anywhere)
+    if (interaction.isCommand() && interaction.commandName !== 'sadhanacard') {
         if (interaction.channelId !== SADHANA_CHANNEL_ID) {
             await interaction.reply({
                 content: `Please use this command only in the <#${SADHANA_CHANNEL_ID}> channel.`,
@@ -741,9 +726,11 @@ client.on('interactionCreate', async interaction => {
                     } else { // First log ever
                         newStreakVal = 1;
                     }
+                    console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Inside updateLogicFn for user ${userId}. currentUserStreak: ${JSON.stringify(currentUserStreak)}, newStreakVal: ${newStreakVal}`); // Added log
                     return { newStreakCount: newStreakVal, newLastLoggedDateKey: todayISTDateString };
                  });
                  console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database findOrCreateAndUpdateUserStreak for streak (/chant).`);
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] User streak received by /chant handler: ${userStreak.currentStreak}`); // Added log
             } catch (dbError) {
                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during streak update for /chant:`, dbError);
                  const embed = new EmbedBuilder()
@@ -839,8 +826,9 @@ client.on('interactionCreate', async interaction => {
                 .addFields(
                     { name: '/chant <rounds>', value: 'Log the number of japa rounds you chanted today.' },
                     { name: '/streakboard', value: 'See the current chanting streak leaderboard.' },
+                    { name: '/sadhanacard', value: 'Displays your personal chanting progress card with streaks and badges (can be used anywhere).' },
                     { name: '/help', value: 'Displays this help message.' },
-                    { name: '/checkdata [type] [user] [date_string]', value: '*(Admin Only)* Check specific data from the database. Use `User Log by Date` to check a user\'s daily log, `User Streak` for a user\'s streak, `Total Sadhana Entries Count` for total daily logs, `Total User Streak Entries Count` for total streak entries. Date format for `date_string` is `MM/DD/YYYY` or `YYYY-MM-DD`.' },
+                    { name: '/checkdata [type] [user] [date_string]', value: '*(Admin Only)* Check specific data from the database. Use `User Log by Date` to check a user\'s daily log, `User Streak` for a user\'s streak, `Total Sadhana Entries Count` for total daily logs, `Total User Streak Entries Count` for total streak entries. Date format for `date_string` is `YYYY-MM-DD` or `MM/DD/YYYY`.' },
                     { name: '/streakset <user> <streak>', value: '*(Admin Only)* Manually set a user\'s chanting streak.' }
                 )
                 .setFooter({ text: 'May your chanting be blissful! Hare Krishna! 🙏' });
@@ -972,82 +960,204 @@ client.on('interactionCreate', async interaction => {
                 await interaction.editReply({ embeds: [embed] });
             }
         }
-    }
-    // --- Handle Button Interactions ---
-    else if (interaction.isButton()) {
-        console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling button interaction: ${interaction.customId}`);
-        const [action, ...params] = interaction.customId.split('_');
-
-        // Handle extra rounds button
-        if (action === 'extra' && params[0] === 'rounds' && params[1] === 'button') {
-            const buttonDateString = params[2]; // YYYY-MM-DD
-            const buttonUserId = params[3]; // The user ID encoded in the button
-
-            // Ensure the interaction is from the user who triggered the command
-            if (interaction.user.id !== buttonUserId) {
-                await interaction.reply({ content: "You can only interact with your own buttons.", ephemeral: true });
+        else if (commandName === 'sadhanacard') {
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /sadhanacard command for user ${username}`);
+            try {
+                await interaction.deferReply();
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
+            } catch (deferError) {
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for interaction ${interaction.id}:`, deferError);
                 return;
             }
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Deferral complete for ${interaction.id}. Proceeding with command logic.`);
 
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Extra rounds button clicked by user ${userId} for date ${buttonDateString}.`);
-            await interaction.deferUpdate(); // Acknowledge the button click
+            const userId = interaction.user.id;
 
             try {
-                // Fetch the Sadhana log for the specific user and date
-                const sadhanaLogToday = await Sadhana.findOne({
-                    where: {
-                        userId: userId,
-                        date: buttonDateString
-                    }
+                // Fetch user streak data
+                const userStreak = await getUserStreak(userId);
+                const currentStreak = userStreak ? userStreak.currentStreak : 0;
+                const longestStreak = userStreak ? userStreak.longestStreak : 0; // Get longest streak
+
+                // Fetch all Sadhana logs for the user to calculate totals and all-time score
+                const allSadhanaLogs = await Sadhana.findAll({
+                    where: { userId: userId }
                 });
 
-                if (sadhanaLogToday) {
-                    // Update japa rounds (e.g., add 4 more rounds for a challenge)
-                    const roundsToAdd = 4;
-                    sadhanaLogToday.japaRounds = (sadhanaLogToday.japaRounds || 0) + roundsToAdd;
-                    sadhanaLogToday.score = calculateDailyScore(sadhanaLogToday.toJSON()); // Recalculate score
-                    await sadhanaLogToday.save();
+                let totalJapaRounds = 0;
+                let totalChantingBonusAllTime = 0;
+                let allTimeScore = 0;
+                let loggedDaysCount = 0; // Count of days with at least one log
 
-                    const randomResponse = extraRoundsFunnyResponses[Math.floor(Math.random() * extraRoundsFunnyResponses.length)];
-                    await interaction.followUp({ content: `${randomResponse} You added ${roundsToAdd} more rounds! Total for today: **${sadhanaLogToday.japaRounds}** rounds. Current Score: **${sadhanaLogToday.score.toFixed(2)}**`, ephemeral: true });
-                    console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Extra rounds handled for user ${userId} on ${buttonDateString}.`);
-                } else {
-                    await interaction.followUp({ content: `Could not find your chanting log for ${format(parse(buttonDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}. Please use \`/chant\` first.`, ephemeral: true });
-                    console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Sadhana log not found for extra rounds for user ${userId} on ${buttonDateString}.`);
+                // Calculate totals and all-time score based ONLY on chanting
+                for (const log of allSadhanaLogs) {
+                    const logData = log.toJSON();
+                    totalJapaRounds += logData.japaRounds || 0;
+                    totalChantingBonusAllTime += logData.chantingTimeBonus || 0;
+                    allTimeScore += calculateDailyScore(logData); // This function now only uses chanting data
+                    loggedDaysCount++;
                 }
 
-                // Disable extra rounds button after action
-                const updatedComponents = interaction.message.components.map(row =>
-                    new ActionRowBuilder().addComponents(
+                // Determine badges (chanting-only)
+                const badges = [];
+                if (loggedDaysCount > 0) {
+                    badges.push('🔰 First Step (Logged at least once)');
+                }
+                if (currentStreak >= 7) {
+                    badges.push('🔥 7-Day Streaker');
+                }
+                if (currentStreak >= 30) {
+                    badges.push('🌟 30-Day Streaker');
+                }
+                if (currentStreak >= 100) { // New 100-day streak badge
+                    badges.push('💯 Century Streaker');
+                }
+                if (totalJapaRounds >= 100) { // Example threshold
+                    badges.push('📿 Japa Seeker (100+ Rounds)');
+                }
+                if (totalJapaRounds >= 1000) { // Example threshold
+                    badges.push('📿 Japa Master (1000+ Rounds)');
+                }
+                if (allTimeScore >= 50) { // Example score threshold
+                    badges.push('✨ Dedicated Devotee (50+ Total Chanting Score)');
+                }
+
+                const embed = new EmbedBuilder()
+                    .setColor('#FFC0CB') // Pink color for the card
+                    .setTitle(`Sadhana Card: ${username}`)
+                    .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true })) // User's avatar
+                    .setDescription(`Your chanting journey at a glance!`)
+                    .addFields(
+                        { name: 'Current Streak 🔥', value: `${currentStreak} day(s)`, inline: true },
+                        { name: 'Longest Streak 🏆', value: `${longestStreak} day(s)`, inline: true },
+                        { name: 'All-Time Chanting Score ✨', value: `${allTimeScore.toFixed(2)} points`, inline: true },
+                        { name: 'Total Japa Rounds 📿', value: `${totalJapaRounds}`, inline: true },
+                        { name: 'Total Chanting Time Bonus ⏰', value: `${totalChantingBonusAllTime}`, inline: true },
+                        { name: 'Badges Earned 🎗️', value: badges.length > 0 ? badges.join('\n') : 'None yet! Keep chanting to earn badges!' },
+                    )
+                    .setFooter({ text: 'Keep going on your spiritual chanting journey! Hare Krishna! 🙏' })
+                    .setTimestamp();
+
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Attempting to editReply for /sadhanacard command for user ${userId}`);
+                try {
+                    await interaction.editReply({ embeds: [embed] });
+                    console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for /sadhanacard command for user ${userId}`);
+                } catch (editError) {
+                    console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply with embed for /sadhanacard command for user ${userId}:`, editError);
+                    try {
+                        console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Full editReply error object:`, editError);
+                        await interaction.followUp({ content: 'There was an error generating your Sadhana Card, but I\'m still working on it!', ephemeral: true });
+                    } catch (followUpError) {
+                        console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
+                    }
+                }
+
+            } catch (error) {
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error during /sadhanacard command for user ${userId}:`, error);
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('Sadhana Card Failed')
+                    .setDescription(`An error occurred while generating your Sadhana Card: ${error.message}`);
+                await interaction.editReply({ embeds: [embed] });
+            }
+        }
+    }
+
+    // --- Handle Button Interactions ---
+    else if (interaction.isButton()) {
+        const customIdParts = interaction.customId.split('_');
+        const buttonAction = customIdParts[0];
+        const buttonDateString = customIdParts[customIdParts.length - 2]; // Date is second to last
+        const originalCommanderId = customIdParts[customIdParts.length - 1]; // Commander ID is last part
+
+        // Special handling for streakboard pagination buttons as they don't relate to a specific daily log
+        if (interaction.customId.startsWith('streakboard_page_')) {
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling streakboard pagination button: ${interaction.customId}`);
+            await interaction.deferUpdate(); // Defer the button interaction update
+
+            try {
+                const pageNumber = parseInt(customIdParts[2]); // Page number is the third part
+                const userStreaks = await getAllUserStreaks(); // Fetch all data again for pagination
+
+                const totalPages = Math.ceil(userStreaks.length / ENTRIES_PER_PAGE);
+
+                // Reconstruct embed and components
+                const { embeds, components } = await generateStreakboardPage(userStreaks, pageNumber, totalPages, interaction);
+
+                try {
+                    await interaction.editReply({ embeds: embeds, components: components });
+                    console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Successfully edited reply for streakboard pagination.`);
+                } catch (editError) {
+                    console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error editing reply for streakboard pagination:`, editError);
+                    // Add fallback
+                    try {
+                        await interaction.followUp({ content: 'Successfully updated pagination, but failed to refresh the original message.', ephemeral: true });
+                    } catch (followUpError) {
+                        console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Failed to send follow-up message after editReply error:`, followUpError);
+                    }
+                }
+            } catch (error) {
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error during streakboard pagination button:`, error);
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('Streak Leaderboard Failed')
+                    .setDescription(`An error occurred while fetching streak data: ${error.message}`);
+                await interaction.editReply({ embeds: [embed], components: [] }); // Remove buttons on error
+            }
+            return; // Exit after handling streakboard buttons
+        }
+
+        // --- Restrict daily action buttons to the original commander ---
+        if (interaction.user.id !== originalCommanderId) {
+            await interaction.reply({ content: 'You can only interact with your own Sadhana log buttons.', ephemeral: true });
+            return;
+        }
+
+        console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling daily action button: ${interaction.customId} for user ${username} for date ${buttonDateString}`);
+        await interaction.deferUpdate(); // Defer the button interaction
+
+        const sadhanaLog = await Sadhana.findOne({
+            where: { userId: originalCommanderId, date: buttonDateString } // Use date and commanderId from custom ID
+        });
+
+        if (!sadhanaLog) {
+            // This button might be from a past day for which the log was cleared, or an invalid date.
+            await interaction.followUp({ content: 'This button refers to a log entry that no longer exists or is too old to modify directly. Please use `/chant` to create a new log for today.', ephemeral: true });
+            return;
+        }
+
+        // --- Handle "Extra Rounds" Button (now a challenge) ---
+        if (buttonAction === 'extra' && customIdParts[1] === 'rounds' && customIdParts[2] === 'button') {
+            try {
+                // Generate a random number of rounds for the challenge (1 to 5)
+                const challengeRounds = Math.floor(Math.random() * 5) + 1;
+
+                const funnyResponse = extraRoundsFunnyResponses[Math.floor(Math.random() * extraRoundsFunnyResponses.length)];
+
+                const embed = new EmbedBuilder()
+                    .setColor('#FFA500') // Orange for fun
+                    .setTitle(`Japa Challenge! 🎉`)
+                    .setDescription(`${funnyResponse}\n\n**${username}** clicked the button and received a challenge to chant **${challengeRounds}** extra rounds for ${format(parse(buttonDateString, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}! Hare Krishna! 🙏`);
+
+                await interaction.followUp({ embeds: [embed], ephemeral: false }); // Visible to everyone
+                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] User ${userId} was challenged to chant ${challengeRounds} extra rounds for date ${buttonDateString}.`);
+
+            } catch (error) {
+                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error handling extra rounds button for user ${userId} on date ${buttonDateString}:`, error);
+                await interaction.followUp({ content: 'There was an error with the extra rounds challenge. Please try again later.', ephemeral: true });
+            }
+            // Disable the extra rounds button after it's clicked
+            const updatedComponents = interaction.message.components.map(row => {
+                if (row.components.some(comp => comp.customId.startsWith('extra_rounds_button_'))) {
+                    return new ActionRowBuilder().addComponents(
                         row.components.map(button =>
                             ButtonBuilder.from(button).setDisabled(true)
                         )
-                    )
-                );
-                await interaction.editReply({ components: updatedComponents });
-
-            } catch (error) {
-                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error handling extra rounds button for user ${userId}:`, error);
-                await interaction.followUp({ content: 'An error occurred while adding extra rounds. Please try again.', ephemeral: true });
-            }
-        }
-        else if (action === 'streakboard' && params[0] === 'page') {
-            const pageNumber = parseInt(params[1], 10);
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Streakboard page button clicked. Page: ${pageNumber}`);
-            await interaction.deferUpdate(); // Acknowledge the button click
-
-            try {
-                const allStreaks = await getAllUserStreaks();
-                const totalPages = Math.ceil(allStreaks.length / ENTRIES_PER_PAGE);
-
-                const { embeds, components } = await generateStreakboardPage(allStreaks, pageNumber, totalPages, interaction);
-                await interaction.editReply({ embeds, components });
-                console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Streakboard page ${pageNumber} updated for user ${userId}`);
-
-            } catch (error) {
-                console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error handling streakboard pagination:`, error);
-                await interaction.followUp({ content: 'An error occurred while loading the streakboard page. Please try again.', ephemeral: true });
-            }
+                    );
+                }
+                return row;
+            });
+            await interaction.editReply({ components: updatedComponents });
         }
     }
 });
@@ -1068,4 +1178,4 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 app.get("/", (req, res) => res.send("Bot is alive!"));
-app.listen(port, () => console.log(`Web server listening on port ${port}`));
+app.listen(port, () => console.log(`Web server running on port ${port}`));
