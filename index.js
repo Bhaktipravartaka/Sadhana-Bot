@@ -159,6 +159,8 @@ async function findOrCreateAndUpdateUserStreak(userId, updateLogicFn) {
              },
          });
 
+        console.log(`[${new Date().toISOString()}] [PID:${process.pid}] UserStreak findOrCreate for ${userId}. Created: ${created}. Initial instance currentStreak: ${userStreakInstance.currentStreak}, lastLoggedDateKey: ${userStreakInstance.lastLoggedDateKey}`); // Added log
+
         const currentUserStreakData = created ? null : userStreakInstance.toJSON();
         const { newStreakCount, newLastLoggedDateKey } = updateLogicFn(currentUserStreakData);
 
@@ -171,7 +173,7 @@ async function findOrCreateAndUpdateUserStreak(userId, updateLogicFn) {
         }
 
         await userStreakInstance.save();
-        console.log(`[${new Date().toISOString()}] [PID:${process.pid}] User streak saved for ${userId}. Current streak: ${userStreakInstance.currentStreak}, Longest streak: ${userStreakInstance.longestStreak}`); // Added log
+        console.log(`[${new Date().toISOString()}] [PID:${process.pid}] User streak saved for ${userId}. Current streak: ${userStreakInstance.currentStreak}, Longest streak: ${userStreakInstance.longestStreak}`);
         return userStreakInstance.toJSON();
 
      } catch (err) {
@@ -753,6 +755,7 @@ client.on('interactionCreate', async interaction => {
                 .setDescription(`You logged **${sadhanaEntry.japaRounds}** rounds for today (${format(todayIST, 'dd/MM/yyyy')}).\n` +
                               `Today's Practice Score: **${sadhanaEntry.score.toFixed(2)}**\n` +
                               `Current Chanting Streak: **${userStreak.currentStreak} day(s) 🙏**`);
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Value of userStreak.currentStreak for embed: ${userStreak.currentStreak}`); // Added log
 
             // Embed userId into customId for multi-user interaction control
             const extraRoundsButton = new ButtonBuilder()
@@ -851,13 +854,13 @@ client.on('interactionCreate', async interaction => {
 
             let parsedDate = null;
             if (dateStringInput) {
-                 // Try parsing with YYYY-MM-DD or MM/DD/YYYY
+                 // Try parsing with पाण्डेय-MM-DD or MM/DD/YYYY
                  parsedDate = parse(dateStringInput, 'yyyy-MM-dd', new Date());
                  if (isNaN(parsedDate.getTime())) { // If first parse fails, try MM/DD/YYYY
                      parsedDate = parse(dateStringInput, 'MM/dd/yyyy', new Date());
                  }
                  if (isNaN(parsedDate.getTime())) {
-                     await interaction.editReply({ content: 'Invalid date format. Please use YYYY-MM-DD or MM/DD/YYYY (e.g., 2025-07-05 or 07/05/2025).' });
+                     await interaction.editReply({ content: 'Invalid date format. Please use पाण्डेय-MM-DD or MM/DD/YYYY (e.g., 2025-07-05 or 07/05/2025).' });
                      return;
                  }
             }
