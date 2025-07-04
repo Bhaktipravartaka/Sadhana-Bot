@@ -159,7 +159,7 @@ async function findOrCreateAndUpdateUserStreak(userId, updateLogicFn) {
              },
          });
 
-        console.log(`[${new Date().toISOString()}] [PID:${process.pid}] UserStreak findOrCreate for ${userId}. Created: ${created}. Initial instance currentStreak: ${userStreakInstance.currentStreak}, lastLoggedDateKey: ${userStreakInstance.lastLoggedDateKey}`); // Added log
+        console.log(`[${new Date().toISOString()}] [PID:${process.pid}] UserStreak findOrCreate for ${userId}. Created: ${created}. Initial instance currentStreak: ${userStreakInstance.currentStreak}, lastLoggedDateKey: ${userStreakInstance.lastLoggedDateKey}`);
 
         const currentUserStreakData = created ? null : userStreakInstance.toJSON();
         const { newStreakCount, newLastLoggedDateKey } = updateLogicFn(currentUserStreakData);
@@ -716,23 +716,27 @@ client.on('interactionCreate', async interaction => {
                     const lastLoggedDate = lastLoggedDateKey ? startOfDay(parse(lastLoggedDateKey, 'yyyy-MM-dd', new Date())) : null;
                     const todayISTStartOfDay = startOfDay(todayIST); // Ensure we're comparing start of day
 
-                    if (lastLoggedDate && !isNaN(lastLoggedDate.getTime())) {
+                    if (!lastLoggedDate || isNaN(lastLoggedDate.getTime())) {
+                        // This is the very first log for this user, or lastLoggedDate is invalid.
+                        newStreakVal = 1;
+                    } else {
                         const dayDifference = differenceInCalendarDays(todayISTStartOfDay, lastLoggedDate);
                         if (dayDifference === 1) { // Logged yesterday, continue streak
                             newStreakVal = currentStreakVal + 1;
-                        } else if (dayDifference > 1) { // Streak broken
+                        } else if (dayDifference > 1) { // Streak broken, start new streak
                             newStreakVal = 1;
-                        } else { // Already logged today, or same day but different time
-                            newStreakVal = currentStreakVal;
+                        } else { // dayDifference === 0, already logged today
+                            // If they already logged today and their streak was 0, it means they just started/restarted.
+                            // If currentStreakVal is 0 and they are logging on the same day, it should become 1.
+                            // Otherwise, if currentStreakVal > 0, it means they are just logging more for today.
+                            newStreakVal = currentStreakVal === 0 ? 1 : currentStreakVal; // This line is the key change
                         }
-                    } else { // First log ever
-                        newStreakVal = 1;
                     }
-                    console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Inside updateLogicFn for user ${userId}. currentUserStreak: ${JSON.stringify(currentUserStreak)}, newStreakVal: ${newStreakVal}`); // Added log
+                    console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Inside updateLogicFn for user ${userId}. currentUserStreak: ${JSON.stringify(currentUserStreak)}, newStreakVal: ${newStreakVal}`);
                     return { newStreakCount: newStreakVal, newLastLoggedDateKey: todayISTDateString };
                  });
                  console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Finished database findOrCreateAndUpdateUserStreak for streak (/chant).`);
-                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] User streak received by /chant handler: ${userStreak.currentStreak}`); // Added log
+                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] User streak received by /chant handler: ${userStreak.currentStreak}`);
             } catch (dbError) {
                 console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Database error during streak update for /chant:`, dbError);
                  const embed = new EmbedBuilder()
@@ -755,7 +759,7 @@ client.on('interactionCreate', async interaction => {
                 .setDescription(`You logged **${sadhanaEntry.japaRounds}** rounds for today (${format(todayIST, 'dd/MM/yyyy')}).\n` +
                               `Today's Practice Score: **${sadhanaEntry.score.toFixed(2)}**\n` +
                               `Current Chanting Streak: **${userStreak.currentStreak} day(s) 🙏**`);
-            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Value of userStreak.currentStreak for embed: ${userStreak.currentStreak}`); // Added log
+            console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Value of userStreak.currentStreak for embed: ${userStreak.currentStreak}`);
 
             // Embed userId into customId for multi-user interaction control
             const extraRoundsButton = new ButtonBuilder()
@@ -854,13 +858,13 @@ client.on('interactionCreate', async interaction => {
 
             let parsedDate = null;
             if (dateStringInput) {
-                 // Try parsing with पाण्डेय-MM-DD or MM/DD/YYYY
+                 // Try parsing with YYYY-MM-DD or MM/DD/YYYY
                  parsedDate = parse(dateStringInput, 'yyyy-MM-dd', new Date());
                  if (isNaN(parsedDate.getTime())) { // If first parse fails, try MM/DD/YYYY
                      parsedDate = parse(dateStringInput, 'MM/dd/yyyy', new Date());
                  }
                  if (isNaN(parsedDate.getTime())) {
-                     await interaction.editReply({ content: 'Invalid date format. Please use पाण्डेय-MM-DD or MM/DD/YYYY (e.g., 2025-07-05 or 07/05/2025).' });
+                     await interaction.editReply({ content: 'Invalid date format. Please use YYYY-MM-DD or MM/DD/YYYY (e.g., 2025-07-05 or 07/05/2025).' });
                      return;
                  }
             }
