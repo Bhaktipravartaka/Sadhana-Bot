@@ -588,21 +588,17 @@ client.on('interactionCreate', async interaction => {
         // --- Handle /chant command ---
         if (commandName === 'chant') {
             console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Handling /chant command for user ${username}`);
-            // Defer the reply immediately
+            // Defer the reply immediately to acknowledge the interaction within 3 seconds
             try {
                 await interaction.deferReply({ ephemeral: false }); // Ensure it's not ephemeral if you plan public followUps
                 console.log(`[${new Date().toISOString()}] [PID:${process.pid}] Reply deferred successfully for interaction ${interaction.id}`);
             } catch (deferError) {
                  console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Error deferring reply for interaction ${interaction.id}:`, deferError);
-                 // If defer fails, we cannot proceed with editReply or followUp on this interaction.
-                 // Attempt a direct ephemeral reply as a last resort if deferral failed, to inform the user.
+                 // If defer fails, it means the interaction might have already expired.
+                 // Attempt a direct ephemeral reply as a last resort to inform the user.
                  try {
-                     // Check if interaction is still valid to reply to
-                     if (!interaction.replied && !interaction.deferred) {
+                     if (!interaction.replied && !interaction.deferred) { // Check if it hasn't been replied to or deferred by another means
                         await interaction.reply({ content: 'Sorry, I could not process your command right now. Please try again.', ephemeral: true });
-                     } else if (interaction.deferred && !interaction.replied) {
-                         // This case shouldn't happen if deferError was caught, but as a safeguard.
-                         await interaction.followUp({ content: 'Sorry, I could not process your command right now. Please try again. (After deferral error)', ephemeral: true });
                      }
                  } catch (fallbackError) {
                      console.error(`[${new Date().toISOString()}] [PID:${process.pid}] Critical: Failed to send fallback reply after deferral error:`, fallbackError);
