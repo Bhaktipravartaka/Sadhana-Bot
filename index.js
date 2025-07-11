@@ -6,6 +6,16 @@ process.on('unhandledRejection', error => {
     // process.exit(1);
 });
 
+// Optional: Keep alive web server for hosting platforms
+const express = require("express");
+const app = express();
+const port = process.env.PORT || 3000
+
+app.get("/", (req, res) => res.send("Bot is alive!"));
+app.listen(port, () => console.log(`Web server running on port ${port}`));
+
+
+
 require('dotenv').config();
 
 const http = require('http'); // Keep for Render health check
@@ -1175,10 +1185,3 @@ client.on('error', error => {
     console.error('Something went wrong with the Discord client:', error);
 });
 
-// Optional: Keep alive web server for hosting platforms
-const express = require("express");
-const app = express();
-const port = process.env.PORT || 3000;
-
-app.get("/", (req, res) => res.send("Bot is alive!"));
-app.listen(port, () => console.log(`Web server running on port ${port}`));
