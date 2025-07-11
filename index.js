@@ -6,16 +6,6 @@ process.on('unhandledRejection', error => {
     // process.exit(1);
 });
 
-// Optional: Keep alive web server for hosting platforms
-const express = require("express");
-const app = express();
-const port = process.env.PORT || 3000
-
-app.get("/", (req, res) => res.send("Bot is alive!"));
-app.listen(port, () => console.log(`Web server running on port ${port}`));
-
-
-
 require('dotenv').config();
 
 const http = require('http'); // Keep for Render health check
@@ -130,7 +120,15 @@ async function connectDB() {
 
         // Now that the database is ready, log in the Discord client
         console.log('Database ready. Logging in Discord client...');
-        client.login(token);
+        // Add more detailed logging for client login
+        try {
+            console.log(`[${new Date().toISOString()}] Attempting Discord client login...`);
+            await client.login(token);
+            console.log(`[${new Date().toISOString()}] Discord client login initiated successfully.`);
+        } catch (loginError) {
+            console.error(`[${new Date().toISOString()}] FATAL ERROR: Discord client login failed:`, loginError);
+            process.exit(1); // Exit if Discord login fails
+        }
 
     } catch (error) {
         console.error('FATAL ERROR: Unable to connect to the database or sync models:', error);
@@ -566,6 +564,23 @@ client.once('ready', () => {
         scheduled: true,
         timezone: IST_TIMEZONE
     });
+});
+
+// Add more detailed logging for client events
+client.on('shardReady', (id, unavailableGuilds) => {
+    console.log(`[${new Date().toISOString()}] Shard ${id} ready. Unavailable guilds: ${unavailableGuilds ? unavailableGuilds.size : 0}`);
+});
+
+client.on('warn', info => {
+    console.warn(`[${new Date().toISOString()}] Discord.js Warning:`, info);
+});
+
+client.on('disconnect', event => {
+    console.warn(`[${new Date().toISOString()}] Discord client disconnected: Code ${event.code}, Reason: ${event.reason || 'No reason provided'}`);
+});
+
+client.on('error', error => {
+    console.error('Something went wrong with the Discord client:', error);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -1181,7 +1196,15 @@ connectDB();
 
 
 // Basic error handling for issues with the Discord client itself (like login failures).
-client.on('error', error => {
-    console.error('Something went wrong with the Discord client:', error);
-});
+// This is a general error handler for the client.
+// client.on('error', error => {
+//     console.error('Something went wrong with the Discord client:', error);
+// });
 
+// Optional: Keep alive web server for hosting platforms
+const express = require("express");
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.get("/", (req, res) => res.send("Bot is alive!"));
+app.listen(port, () => console.log(`Web server running on port ${port}`));
