@@ -123,6 +123,7 @@ async function connectDB() {
         // Add more detailed logging for client login
         try {
             console.log(`[${new Date().toISOString()}] Attempting Discord client login...`);
+            console.log(`[${new Date().toISOString()}] DISCORD_TOKEN length: ${token ? token.length : 'undefined'}`); // Log token length
             await client.login(token);
             console.log(`[${new Date().toISOString()}] Discord client login initiated successfully.`);
         } catch (loginError) {
@@ -581,6 +582,15 @@ client.on('disconnect', event => {
 
 client.on('error', error => {
     console.error('Something went wrong with the Discord client:', error);
+});
+
+client.on('rateLimit', rateLimitInfo => {
+    console.warn(`[${new Date().toISOString()}] Discord.js Rate Limit:`, rateLimitInfo);
+});
+
+client.on('debug', info => {
+    // This is very verbose, enable only when actively debugging connection issues
+    // console.log(`[${new Date().toISOString()}] Discord.js Debug:`, info);
 });
 
 client.on('interactionCreate', async interaction => {
