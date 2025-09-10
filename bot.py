@@ -96,49 +96,7 @@ async def on_ready():
             logging.warning("Database connection health check failed.")
 
 
-@bot.tree.command(name="start", description="Start a new daily Sadhana challenge.")
-@app_commands.describe(
-    sadhana_name="The name of your Sadhana challenge.",
-    duration="The duration of the challenge in days."
-)
-async def start_challenge(interaction: discord.Interaction, sadhana_name: str, duration: int):
-    user_id = interaction.user.id
-    guild_id = interaction.guild.id
-    
-    # Check if a user is already in a challenge in this guild
-    async with db_pool.acquire() as connection:
-        active_challenge = await connection.fetchval(
-            "SELECT 1 FROM sadhanas WHERE user_id = $1 AND guild_id = $2 AND status = 'active'",
-            user_id, guild_id
-        )
-
-        if active_challenge:
-            await interaction.response.send_message("You are already in an active challenge. Complete it or use `/cancel` to start a new one.", ephemeral=True)
-            return
-
-        # Insert a new challenge, including the new chant_count
-        start_date = datetime.date.today()
-        end_date = start_date + datetime.timedelta(days=duration)
-        await connection.execute(
-            """
-            INSERT INTO sadhanas (user_id, guild_id, sadhana_name, duration, start_date, end_date, streak, chant_count, last_check_in_date)
-            VALUES ($1, $2, $3, $4, $5, $6, 0, 0, NULL)
-            """,
-            user_id, guild_id, sadhana_name, duration, start_date, end_date
-        )
-
-    embed = discord.Embed(
-        title=f"Sadhana Challenge Started!",
-        description=f"**{sadhana_name}** for **{duration} days**.",
-        color=discord.Color.green()
-    )
-    embed.add_field(name="Started", value=start_date.strftime("%Y-%m-%d"), inline=True)
-    embed.add_field(name="Ends", value=end_date.strftime("%Y-%m-%d"), inline=True)
-    embed.add_field(name="Streak Score", value="0 points", inline=False)
-    await interaction.response.send_message(embed=embed)
-
-
-@bot.tree.command(name="chant", description="Track your chanting rounds for your current challenge.")
+@bot.tree.command(name="chant", description="Track your chanting rounds.")
 @app_commands.describe(
     rounds="The number of rounds you have chanted."
 )
@@ -156,101 +114,86 @@ async def chant_rounds(interaction: discord.Interaction, rounds: int):
             user_id, guild_id
         )
 
-        if not challenge:
-            await interaction.response.send_message("You are not in an active challenge. Use `/start` to begin one.", ephemeral=True)
-            return
-
-        # Check if the user has already received a streak point today
-        last_check_in_date = challenge['last_check_in_date']
         points_to_add = 0
-        if not last_check_in_date or last_check_in_date.date() != today:
+        response_text = ""
+
+        if not challenge:
+            # First time user is chanting, create a record
             if now_ist < nine_am_ist:
-                points_to_add = 2  # 1 base + 1 extra point
+                points_to_add = 2
             else:
-                points_to_add = 1  # 1 base point
+                points_to_add = 1
             
-            # Update last check in date and streak points
             await connection.execute(
                 """
-                UPDATE sadhanas SET streak = streak + $1, last_check_in_date = $2
-                WHERE user_id = $3 AND guild_id = $4
+                INSERT INTO sadhanas (user_id, guild_id, sadhana_name, duration, start_date, end_date, streak, chant_count, last_check_in_date, status)
+                VALUES ($1, $2, 'Daily Sadhana', 0, $3, $3, $4, $5, $3, 'active')
                 """,
-                points_to_add, today, user_id, guild_id
+                user_id, guild_id, today, points_to_add, rounds
             )
+            response_text = f"Welcome! You have logged {rounds} rounds and earned {points_to_add} points for your streak. You are now officially a sadhana devotee!"
+        else:
+            # User has an existing record
+            last_check_in_date = challenge['last_check_in_date']
             
-        # Always update the chant count
-        new_chant_count = challenge['chant_count'] + rounds
-        await connection.execute(
-            """
-            UPDATE sadhanas SET chant_count = $1
-            WHERE user_id = $2 AND guild_id = $3
-            """,
-            new_chant_count, user_id, guild_id
-        )
+            if not last_check_in_date or last_check_in_date.date() != today:
+                if now_ist < nine_am_ist:
+                    points_to_add = 2
+                else:
+                    points_to_add = 1
+                
+                await connection.execute(
+                    """
+                    UPDATE sadhanas SET streak = streak + $1, last_check_in_date = $2
+                    WHERE user_id = $3 AND guild_id = $4
+                    """,
+                    points_to_add, today, user_id, guild_id
+                )
+                
+            # Always update the chant count
+            new_chant_count = challenge['chant_count'] + rounds
+            await connection.execute(
+                """
+                UPDATE sadhanas SET chant_count = $1
+                WHERE user_id = $2 AND guild_id = $3
+                """,
+                new_chant_count, user_id, guild_id
+            )
 
-    response_text = f"You have logged {rounds} rounds. "
-    if points_to_add > 0:
-        response_text += f"You have also earned {points_to_add} points for your streak!"
-    else:
-        response_text += "You have already earned points for your streak today."
+            response_text = f"You have logged {rounds} rounds. "
+            if points_to_add > 0:
+                response_text += f"You have also earned {points_to_add} points for your streak!"
+            else:
+                response_text += "You have already earned points for your streak today."
         
     await interaction.response.send_message(response_text, ephemeral=True)
 
 
-@bot.tree.command(name="cancel", description="Cancel your current Sadhana challenge.")
-async def cancel_challenge(interaction: discord.Interaction):
+@bot.tree.command(name="profile", description="View your Sadhana profile and progress.")
+async def show_profile(interaction: discord.Interaction):
     user_id = interaction.user.id
     guild_id = interaction.guild.id
     
     async with db_pool.acquire() as connection:
-        challenge = await connection.fetchrow(
-            "SELECT sadhana_name FROM sadhanas WHERE user_id = $1 AND guild_id = $2 AND status = 'active'",
-            user_id, guild_id
-        )
-
-        if not challenge:
-            await interaction.response.send_message("You are not in an active challenge to cancel.", ephemeral=True)
-            return
-
-        sadhana_name = challenge['sadhana_name']
-        await connection.execute(
-            "UPDATE sadhanas SET status = 'cancelled' WHERE user_id = $1 AND guild_id = $2",
-            user_id, guild_id
-        )
-        await interaction.response.send_message(f"Your '{sadhana_name}' challenge has been successfully cancelled.", ephemeral=True)
-
-
-@bot.tree.command(name="progress", description="View your current Sadhana challenge progress.")
-async def show_progress(interaction: discord.Interaction):
-    user_id = interaction.user.id
-    guild_id = interaction.guild.id
-    
-    async with db_pool.acquire() as connection:
-        challenge = await connection.fetchrow(
+        profile = await connection.fetchrow(
             "SELECT * FROM sadhanas WHERE user_id = $1 AND guild_id = $2 AND status = 'active'",
             user_id, guild_id
         )
 
-        if not challenge:
-            await interaction.response.send_message("You are not in an active challenge. Use `/start` to begin one.", ephemeral=True)
+        if not profile:
+            await interaction.response.send_message("You are not in an active sadhana. Use `/chant` to begin!", ephemeral=True)
             return
 
-        sadhana_name = challenge['sadhana_name']
-        duration = challenge['duration']
-        start_date = challenge['start_date'].date()
-        streak_points = challenge['streak']
-        days_passed = (datetime.date.today() - start_date).days + 1
-        chant_count = challenge['chant_count']
+        streak_points = profile['streak']
+        chant_count = profile['chant_count']
         
         embed = discord.Embed(
-            title=f"Sadhana Card for {interaction.user.display_name}",
-            description=f"**{sadhana_name}** ({duration}-day challenge)",
+            title=f"Sadhana Profile for {interaction.user.display_name}",
+            description="Your personal sadhana journey.",
             color=discord.Color.orange()
         )
-        embed.add_field(name="Streak Score", value=f"{streak_points} points", inline=True)
-        embed.add_field(name="Total Rounds Chanted", value=f"{chant_count} rounds", inline=True)
-        embed.add_field(name="Started", value=start_date.strftime("%Y-%m-%d"), inline=False)
-        embed.add_field(name="Days in Challenge", value=f"{days_passed}", inline=False)
+        embed.add_field(name="Total Streak Score", value=f"**{streak_points}** points", inline=True)
+        embed.add_field(name="Total Rounds Chanted", value=f"**{chant_count}** rounds", inline=True)
         
         await interaction.response.send_message(embed=embed)
 
@@ -273,7 +216,7 @@ async def show_leaderboard(interaction: discord.Interaction):
         )
         
     if not leaderboard:
-        await interaction.response.send_message("There are no active Sadhana challenges in this server yet!", ephemeral=True)
+        await interaction.response.send_message("There are no active Sadhana devotees in this server yet! Be the first one by using `/chant`.", ephemeral=True)
         return
         
     embed = discord.Embed(
