@@ -14,7 +14,9 @@ from discord import app_commands, ui
 import logging
 from flask import Flask
 from threading import Thread
-import datetime # Added this import to fix the "datetime is not defined" error
+import datetime
+import urllib.parse
+import pytz
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -45,111 +47,261 @@ async def setup_db_pool():
     global db_pool
     if db_pool is None:
         try:
-            db_pool = await asyncpg.create_pool(POSTGRES_URI, ssl='require')
+            # Parse the PostgreSQL URI
+            uri_parsed = urllib.parse.urlparse(POSTGRES_URI)
+            db_user = uri_parsed.username
+            db_password = uri_parsed.password
+            db_name = uri_parsed.path[1:] # Strip the leading slash
+            db_host = uri_parsed.hostname
+            db_port = uri_parsed.port
+            
+            # Create a pool using the parsed components
+            db_pool = await asyncpg.create_pool(
+                user=db_user,
+                password=db_password,
+                database=db_name,
+                host=db_host,
+                port=db_port,
+                ssl='require'
+            )
             logging.info("Successfully connected to the PostgreSQL database.")
-            # Create the 'Sadhana' table if it doesn't exist
-            await db_pool.execute('''
-                CREATE TABLE IF NOT EXISTS "Sadhana" (
-                    "userId" VARCHAR(255) PRIMARY KEY,
-                    "date" DATE NOT NULL,
-                    "count" INTEGER NOT NULL
-                );
-            ''')
-            logging.info("Database schema synchronized successfully.")
-        except Exception as e:
+
+        except asyncpg.exceptions.PostgresError as e:
             logging.error(f"Failed to connect to the database: {e}")
-            raise
+            # Exit the process if we can't connect to the database.
+            exit(1)
+        except Exception as e:
+            logging.error(f"An unexpected error occurred during database connection: {e}")
+            exit(1)
 
 @bot.event
 async def on_ready():
-    logging.info(f'{bot.user} has connected to Discord!')
+    logging.info(f"{bot.user} has connected to Discord!")
+    # Connect to the database
     await setup_db_pool()
-    # Sync command tree
+    # Sync slash commands
     try:
         synced = await bot.tree.sync()
-        logging.info(f"Synced {len(synced)} command(s).")
+        logging.info(f"Synced {len(synced)} slash commands.")
     except Exception as e:
-    # Do not use early return here, just log the error.
-        logging.error(f"Failed to sync commands: {e}")
+        logging.error(f"Failed to sync slash commands: {e}")
+    
+    
+    # Run a health check query
+    async with db_pool.acquire() as connection:
+        result = await connection.fetchval("SELECT 1")
+        if result == 1:
+            logging.info("Database connection health check successful.")
+        else:
+            logging.warning("Database connection health check failed.")
 
-@bot.tree.command(name="daily_challenge", description="Start a daily challenge")
-async def daily_challenge_command(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        "Welcome to the daily challenge! Click the button below to complete the challenge.",
-        components=[
-            discord.ui.ActionRow(
-                ui.Button(label="Complete Challenge", style=discord.ButtonStyle.green, custom_id="complete_challenge")
-            )
-        ]
+
+@bot.tree.command(name="start", description="Start a new daily Sadhana challenge.")
+@app_commands.describe(
+    sadhana_name="The name of your Sadhana challenge.",
+    duration="The duration of the challenge in days."
+)
+async def start_challenge(interaction: discord.Interaction, sadhana_name: str, duration: int):
+    user_id = interaction.user.id
+    guild_id = interaction.guild.id
+    
+    # Check if a user is already in a challenge in this guild
+    async with db_pool.acquire() as connection:
+        active_challenge = await connection.fetchval(
+            "SELECT 1 FROM sadhanas WHERE user_id = $1 AND guild_id = $2 AND status = 'active'",
+            user_id, guild_id
+        )
+
+        if active_challenge:
+            await interaction.response.send_message("You are already in an active challenge. Complete it or use `/cancel` to start a new one.", ephemeral=True)
+            return
+
+        # Insert a new challenge, including the new chant_count
+        start_date = datetime.date.today()
+        end_date = start_date + datetime.timedelta(days=duration)
+        await connection.execute(
+            """
+            INSERT INTO sadhanas (user_id, guild_id, sadhana_name, duration, start_date, end_date, streak, chant_count, last_check_in_date)
+            VALUES ($1, $2, $3, $4, $5, $6, 0, 0, NULL)
+            """,
+            user_id, guild_id, sadhana_name, duration, start_date, end_date
+        )
+
+    embed = discord.Embed(
+        title=f"Sadhana Challenge Started!",
+        description=f"**{sadhana_name}** for **{duration} days**.",
+        color=discord.Color.green()
     )
+    embed.add_field(name="Started", value=start_date.strftime("%Y-%m-%d"), inline=True)
+    embed.add_field(name="Ends", value=end_date.strftime("%Y-%m-%d"), inline=True)
+    embed.add_field(name="Streak Score", value="0 points", inline=False)
+    await interaction.response.send_message(embed=embed)
 
-# Button interaction handler
-@bot.event
-async def on_interaction(interaction: discord.Interaction):
-    if interaction.type == discord.InteractionType.component:
-        custom_id = interaction.data.get('custom_id')
 
-        # Handler for complete challenge button
-        if custom_id == 'complete_challenge':
-            user_id = str(interaction.user.id)
-            current_date = datetime.date.today()
-            date_string = current_date.isoformat()
+@bot.tree.command(name="chant", description="Track your chanting rounds for your current challenge.")
+@app_commands.describe(
+    rounds="The number of rounds you have chanted."
+)
+async def chant_rounds(interaction: discord.Interaction, rounds: int):
+    user_id = interaction.user.id
+    guild_id = interaction.guild.id
+    today = datetime.date.today()
+    kolkata_tz = pytz.timezone('Asia/Kolkata')
+    now_ist = datetime.datetime.now(kolkata_tz)
+    nine_am_ist = now_ist.replace(hour=9, minute=0, second=0, microsecond=0)
+    
+    async with db_pool.acquire() as connection:
+        challenge = await connection.fetchrow(
+            "SELECT * FROM sadhanas WHERE user_id = $1 AND guild_id = $2 AND status = 'active'",
+            user_id, guild_id
+        )
 
-            async with db_pool.acquire() as conn:
-                async with conn.transaction():
-                    try:
-                        # Check if the user has already completed the challenge today
-                        record = await conn.fetchrow(
-                            'SELECT * FROM "Sadhana" WHERE "userId" = $1 AND "date" = $2',
-                            user_id, date_string
-                        )
+        if not challenge:
+            await interaction.response.send_message("You are not in an active challenge. Use `/start` to begin one.", ephemeral=True)
+            return
 
-                        if record:
-                            await interaction.response.send_message("You've already completed today's challenge!", ephemeral=True)
-                        else:
-                            await conn.execute(
-                                'INSERT INTO "Sadhana" ("userId", "date", "count") VALUES ($1, $2, $3)',
-                                user_id, date_string, 1
-                            )
-                            # Get the total count for the user
-                            total_count = await conn.fetchval(
-                                'SELECT COUNT(*) FROM "Sadhana" WHERE "userId" = $1',
-                                user_id
-                            )
-                            await interaction.response.send_message(f"Challenge completed! You have completed {total_count} challenges.", ephemeral=True)
-                    except Exception as e:
-                        logging.error(f"Database error during complete_challenge: {e}")
-                        await interaction.response.send_message('An error occurred. Please try again later.', ephemeral=True)
+        # Check if the user has already received a streak point today
+        last_check_in_date = challenge['last_check_in_date']
+        points_to_add = 0
+        if not last_check_in_date or last_check_in_date.date() != today:
+            if now_ist < nine_am_ist:
+                points_to_add = 2  # 1 base + 1 extra point
+            else:
+                points_to_add = 1  # 1 base point
+            
+            # Update last check in date and streak points
+            await connection.execute(
+                """
+                UPDATE sadhanas SET streak = streak + $1, last_check_in_date = $2
+                WHERE user_id = $3 AND guild_id = $4
+                """,
+                points_to_add, today, user_id, guild_id
+            )
+            
+        # Always update the chant count
+        new_chant_count = challenge['chant_count'] + rounds
+        await connection.execute(
+            """
+            UPDATE sadhanas SET chant_count = $1
+            WHERE user_id = $2 AND guild_id = $3
+            """,
+            new_chant_count, user_id, guild_id
+        )
 
-        # Handler for extra rounds button
-        elif custom_id.startswith('extra_rounds_button_'):
-            parts = custom_id.split('_')
-            button_user_id = parts[3]
-            button_date_string = parts[4]
+    response_text = f"You have logged {rounds} rounds. "
+    if points_to_add > 0:
+        response_text += f"You have also earned {points_to_add} points for your streak!"
+    else:
+        response_text += "You have already earned points for your streak today."
+        
+    await interaction.response.send_message(response_text, ephemeral=True)
 
-            if str(interaction.user.id) != button_user_id:
-                await interaction.response.send_message("This button is not for you.", ephemeral=True)
-                return
 
-            try:
-                async with db_pool.acquire() as conn:
-                    await conn.execute(
-                        'UPDATE "Sadhana" SET "count" = "count" + 1 WHERE "userId" = $1 AND "date" = $2',
-                        button_user_id, button_date_string
-                    )
-                await interaction.response.send_message("You have added an extra round!", ephemeral=True)
+@bot.tree.command(name="cancel", description="Cancel your current Sadhana challenge.")
+async def cancel_challenge(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    guild_id = interaction.guild.id
+    
+    async with db_pool.acquire() as connection:
+        challenge = await connection.fetchrow(
+            "SELECT sadhana_name FROM sadhanas WHERE user_id = $1 AND guild_id = $2 AND status = 'active'",
+            user_id, guild_id
+        )
 
-                # Disable the extra rounds button after it's clicked
-                updated_components = [
-                    discord.ui.ActionRow(
-                        ui.Button(label=comp.label, style=comp.style, custom_id=comp.custom_id, disabled=True)
-                        for comp in row.components
-                    ) for row in interaction.message.components
-                ]
-                await interaction.edit_original_response(components=updated_components)
-            except Exception as e:
-                logging.error(f"Error handling extra rounds challenge for user {button_user_id} on date {button_date_string}: {e}")
-                await interaction.followup.send("There was an error with the extra rounds challenge. Please try again later.", ephemeral=True)
+        if not challenge:
+            await interaction.response.send_message("You are not in an active challenge to cancel.", ephemeral=True)
+            return
+
+        sadhana_name = challenge['sadhana_name']
+        await connection.execute(
+            "UPDATE sadhanas SET status = 'cancelled' WHERE user_id = $1 AND guild_id = $2",
+            user_id, guild_id
+        )
+        await interaction.response.send_message(f"Your '{sadhana_name}' challenge has been successfully cancelled.", ephemeral=True)
+
+
+@bot.tree.command(name="progress", description="View your current Sadhana challenge progress.")
+async def show_progress(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    guild_id = interaction.guild.id
+    
+    async with db_pool.acquire() as connection:
+        challenge = await connection.fetchrow(
+            "SELECT * FROM sadhanas WHERE user_id = $1 AND guild_id = $2 AND status = 'active'",
+            user_id, guild_id
+        )
+
+        if not challenge:
+            await interaction.response.send_message("You are not in an active challenge. Use `/start` to begin one.", ephemeral=True)
+            return
+
+        sadhana_name = challenge['sadhana_name']
+        duration = challenge['duration']
+        start_date = challenge['start_date'].date()
+        streak_points = challenge['streak']
+        days_passed = (datetime.date.today() - start_date).days + 1
+        chant_count = challenge['chant_count']
+        
+        embed = discord.Embed(
+            title=f"Sadhana Card for {interaction.user.display_name}",
+            description=f"**{sadhana_name}** ({duration}-day challenge)",
+            color=discord.Color.orange()
+        )
+        embed.add_field(name="Streak Score", value=f"{streak_points} points", inline=True)
+        embed.add_field(name="Total Rounds Chanted", value=f"{chant_count} rounds", inline=True)
+        embed.add_field(name="Started", value=start_date.strftime("%Y-%m-%d"), inline=False)
+        embed.add_field(name="Days in Challenge", value=f"{days_passed}", inline=False)
+        
+        await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="leaderboard", description="View the top Sadhana devotees in this server.")
+async def show_leaderboard(interaction: discord.Interaction):
+    guild_id = interaction.guild.id
+    
+    async with db_pool.acquire() as connection:
+        # Get the top 10 devotees by streak in the current guild
+        leaderboard = await connection.fetch(
+            """
+            SELECT user_id, streak, chant_count
+            FROM sadhanas
+            WHERE guild_id = $1 AND status = 'active'
+            ORDER BY streak DESC, chant_count DESC
+            LIMIT 10
+            """,
+            guild_id
+        )
+        
+    if not leaderboard:
+        await interaction.response.send_message("There are no active Sadhana challenges in this server yet!", ephemeral=True)
+        return
+        
+    embed = discord.Embed(
+        title="Sadhana Leaderboard",
+        description="Top devotees by Streak Score.",
+        color=discord.Color.gold()
+    )
+    
+    rank = 1
+    for entry in leaderboard:
+        user_id = entry['user_id']
+        streak_points = entry['streak']
+        chant_count = entry['chant_count']
+        
+        try:
+            user = await bot.fetch_user(user_id)
+            user_name = user.display_name
+        except discord.NotFound:
+            user_name = "Unknown User"
+            
+        embed.add_field(
+            name=f"#{rank}. {user_name}",
+            value=f"Score: **{streak_points}** points ({chant_count} rounds)",
+            inline=False
+        )
+        rank += 1
+        
+    await interaction.response.send_message(embed=embed)
 
 
 # Keep alive web server for hosting platforms
@@ -170,6 +322,6 @@ flask_thread.start()
 try:
     bot.run(os.getenv('DISCORD_TOKEN'))
 except discord.HTTPException as e:
-    logging.error(f"HTTPException: {e}. Check your bot token and intents.")
+    logging.error(f"HTTPException: Failed to connect to Discord. Check your token. {e}")
 except Exception as e:
     logging.error(f"An unexpected error occurred: {e}")
