@@ -56,13 +56,15 @@ async def setup_db_pool():
             db_port = uri_parsed.port
             
             # Create a pool using the parsed components
+            # Set statement_cache_size=0 to fix the pgbouncer prepared statement issue
             db_pool = await asyncpg.create_pool(
                 user=db_user,
                 password=db_password,
                 database=db_name,
                 host=db_host,
                 port=db_port,
-                ssl='require'
+                ssl='require',
+                statement_cache_size=0
             )
             logging.info("Successfully connected to the PostgreSQL database.")
 
